@@ -14,6 +14,14 @@ struct OpenCodeState: Equatable {
     var visible: Bool { !locations.isEmpty }
 }
 
+private struct OpenCodeProcess {
+    let pid: pid_t
+    let directory: String
+    let host: (name: String, pid: pid_t?)
+    let tty: String
+    let startedAt: Int64
+}
+
 final class OpenCodeView: NSButton {
     static let blockSize = NSSize(width: 198, height: 30)
     var displayState = OpenCodeState() { didSet { needsDisplay = true; updateLight() } }
@@ -129,12 +137,21 @@ final class OpenCodeMonitor {
         guard let raw = output("/usr/bin/pgrep", ["-x", "opencode"]) else {
             DispatchQueue.main.async { [weak self] in self?.apply([]) }; return
         }
-        let found = raw.split(separator: "\n").compactMap { pid_t($0) }.map { pid -> OpenCodeLocation in
+        let processes = raw.split(separator: "\n").compactMap { pid_t($0) }.map { pid -> OpenCodeProcess in
             let cwd = output("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-d", "cwd", "-Fn"])?.split(separator: "\n").first(where: { $0.hasPrefix("n/") }).map { String($0.dropFirst()) } ?? ""
-            let host = hostApp(startingAt: pid)
-            let tty = output("/bin/ps", ["-p", "\(pid)", "-o", "tty="]) ?? ""
-            let activity: TaskActivity = latestNeedsAttention(in: cwd) ? .unread : processIsWorking(pid) ? .running : .idle
-            return OpenCodeLocation(location: host.name, activity: activity, hostPID: host.pid, tty: tty, directory: cwd)
+            return OpenCodeProcess(pid: pid, directory: cwd, host: hostApp(startingAt: pid),
+                tty: output("/bin/ps", ["-p", "\(pid)", "-o", "tty="]) ?? "", startedAt: processStartedAt(pid))
+        }
+        var found: [OpenCodeLocation] = []
+        for group in Dictionary(grouping: processes, by: \.directory).values {
+            let ordered = group.sorted { $0.startedAt < $1.startedAt }
+            for (index, process) in ordered.enumerated() {
+                let before = index + 1 < ordered.count ? ordered[index + 1].startedAt : nil
+                let attention = latestNeedsAttention(in: process.directory, after: process.startedAt, before: before)
+                let running = latestAssistantRunning(in: process.directory, after: process.startedAt, before: before)
+                found.append(OpenCodeLocation(location: process.host.name, activity: attention ? .unread : running ? .running : .idle,
+                    hostPID: process.host.pid, tty: process.tty, directory: process.directory))
+            }
         }
         let next = found.sorted {
             if $0.location != $1.location { return $0.location == "VS Code" }
@@ -163,19 +180,24 @@ final class OpenCodeMonitor {
         return ("Terminal", nil)
     }
 
-    private func sql(_ cwd: String, expression: String) -> String {
+    private func processStartedAt(_ pid: pid_t) -> Int64 {
+        guard let text = output("/bin/ps", ["-p", "\(pid)", "-o", "lstart="]) else { return 0 }
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "EEE MMM d HH:mm:ss yyyy"
+        return Int64((formatter.date(from: text)?.timeIntervalSince1970 ?? 0) * 1000)
+    }
+
+    private func sql(_ cwd: String, after: Int64, before: Int64?, expression: String) -> String {
         let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode/opencode.db").path
         let escaped = cwd.replacingOccurrences(of: "'", with: "''")
-        return output("/usr/bin/sqlite3", [path, "SELECT \(expression) FROM message m JOIN session s ON s.id=m.session_id WHERE s.directory='\(escaped)' ORDER BY m.time_created DESC LIMIT 1;"]) ?? ""
+        let upper = before.map { " AND s.time_created < \($0)" } ?? ""
+        return output("/usr/bin/sqlite3", [path, "SELECT \(expression) FROM message m JOIN session s ON s.id=m.session_id WHERE s.directory='\(escaped)' AND s.time_created >= \(after)\(upper) ORDER BY m.time_created DESC LIMIT 1;"]) ?? ""
     }
-    private func processIsWorking(_ pid: pid_t) -> Bool {
-        let network = output("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-i", "-sTCP:ESTABLISHED"])
-        // ponytail: network activity identifies the exact process; add OpenCode's per-process API if local-only tool runs must be distinguished.
-        return (network?.split(separator: "\n").count ?? 0) > 1
+    private func latestAssistantRunning(in cwd: String, after: Int64, before: Int64?) -> Bool {
+        sql(cwd, after: after, before: before, expression: "CASE WHEN json_extract(m.data,'$.role')='assistant' AND json_extract(m.data,'$.time.completed') IS NULL THEN '1' ELSE '0' END") == "1"
     }
-    private func latestNeedsAttention(in cwd: String) -> Bool {
+    private func latestNeedsAttention(in cwd: String, after: Int64, before: Int64?) -> Bool {
         let expression = "EXISTS(SELECT 1 FROM part p WHERE p.session_id=s.id AND json_extract(p.data,'$.type')='tool' AND json_extract(p.data,'$.state.status')='pending')"
-        return sql(cwd, expression: expression) == "1"
+        return sql(cwd, after: after, before: before, expression: expression) == "1"
     }
     private func publish(_ next: OpenCodeState) {
         guard next != state else { return }; state = next; onChange?(next)
