@@ -126,7 +126,7 @@ final class QuotaView: NSButton {
         NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
 
         let rows = [("5h", fiveHour), ("7d", weekly)]
-        let color = stale ? NSColor.systemOrange : NSColor.white
+        let color = NSColor.white
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
             .foregroundColor: color
