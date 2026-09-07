@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         statusItem.menu = menu
-        quota.refresh = { [weak self] in self?.refresh() }
+        quota.refresh = { [weak self] in self?.activityMonitor.openBestTask() }
         strip.item.view = quota
         activityMonitor.onChange = { [weak self] in self?.quota.activity = $0 }
         activityMonitor.start()
@@ -94,6 +94,9 @@ if CommandLine.arguments.contains("--self-test") {
     try selfTest()
     activitySelfTest()
     quotaColorSelfTest()
+} else if let index = CommandLine.arguments.firstIndex(of: "--route-probe"), CommandLine.arguments.count > index + 1 {
+    let target = TaskOpenTarget(id: CommandLine.arguments[index + 1], host: "local")
+    print(TaskLauncher.preferredURL(for: target)?.absoluteString ?? "--")
 } else if CommandLine.arguments.contains("--activity-probe") {
     let monitor = TaskActivityMonitor()
     monitor.onChange = { print("Activity: \($0.rawValue)") }

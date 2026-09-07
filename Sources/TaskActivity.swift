@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Darwin
 
 enum TaskActivity: String {
@@ -10,11 +10,15 @@ struct TaskStatus {
     var revision: Int
     var running: Bool
     var owner: String
+    var id: String
+    var host: String
+    var updatedAt: Double
 
     mutating func apply(_ change: [String: Any]) -> Bool {
         guard let next = change["revision"] as? Int else { return false }
         if change["type"] as? String == "snapshot", let state = change["conversationState"] as? [String: Any] {
             running = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String == "active"
+            updatedAt = (state["updatedAt"] as? NSNumber)?.doubleValue ?? updatedAt
         } else if change["type"] as? String == "patches", change["baseRevision"] as? Int == revision,
                   let patches = change["patches"] as? [[String: Any]] {
             for patch in patches {
@@ -32,6 +36,48 @@ struct TaskStatus {
     }
 }
 
+struct TaskOpenTarget: Equatable {
+    let id: String
+    let host: String
+}
+
+enum TaskLauncher {
+    static func url(for target: TaskOpenTarget, vscode: Bool) -> URL? {
+        let value = vscode && target.host == "local"
+            ? "vscode://codex/local/\(target.id)"
+            : "codex://threads/\(target.id)" + (target.host == "local" ? "" : "?hostId=\(target.host)")
+        return URL(string: value)
+    }
+
+    static func open(_ target: TaskOpenTarget?) {
+        guard let target else {
+            NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/Applications/ChatGPT.app"),
+                configuration: .init(), completionHandler: nil)
+            return
+        }
+        guard let url = preferredURL(for: target) else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    static func preferredURL(for target: TaskOpenTarget) -> URL? {
+        url(for: target, vscode: isVSCodeThread(target.id))
+    }
+
+    private static func isVSCodeThread(_ id: String) -> Bool {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Code/User")
+        let needle = Data("openai-codex://route/local/\(id)".utf8)
+        let global = root.appendingPathComponent("globalStorage/state.vscdb")
+        if let data = try? Data(contentsOf: global), data.range(of: needle) != nil { return true }
+        guard let files = FileManager.default.enumerator(at: root.appendingPathComponent("workspaceStorage"),
+            includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return false }
+        for case let file as URL in files where file.lastPathComponent == "state.vscdb" {
+            if let data = try? Data(contentsOf: file), data.range(of: needle) != nil { return true }
+        }
+        return false
+    }
+}
+
 // Read-only desktop IPC follower: retains runtime flags, never conversation text.
 final class TaskActivityMonitor {
     var onChange: ((TaskActivity) -> Void)?
@@ -44,7 +90,7 @@ final class TaskActivityMonitor {
     private var clientID: String?
     private var subscribed = Set<String>()
     private var statuses: [String: TaskStatus] = [:]
-    private var unread = false
+    private var unreadKeys = Set<String>()
     private var current: TaskActivity = .idle
 
     func start() {
@@ -57,6 +103,16 @@ final class TaskActivityMonitor {
         }
     }
     func stop() { queue.sync { timer?.cancel(); timer = nil; disconnect() } }
+
+    func openBestTask() {
+        queue.async {
+            let unread = self.statuses.values.filter { self.unreadKeys.contains("\($0.host):\($0.id)") }
+            let target = (unread.max { $0.updatedAt < $1.updatedAt }
+                ?? self.statuses.values.filter(\.running).max { $0.updatedAt < $1.updatedAt })
+                .map { TaskOpenTarget(id: $0.id, host: $0.host) }
+            DispatchQueue.main.async { TaskLauncher.open(target) }
+        }
+    }
 
     private func disconnect() {
         socketHandle?.readabilityHandler = nil
@@ -121,7 +177,7 @@ final class TaskActivityMonitor {
               let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let atoms = state["electron-persisted-atom-state"] as? [String: Any] else { return }
         if let byHost = atoms["unread-thread-ids-by-host-v1"] as? [String: [String]] {
-            unread = byHost.values.contains { !$0.isEmpty }
+            unreadKeys = Set(byHost.flatMap { host, ids in ids.map { "\(host):\($0)" } })
         }
         for key in atoms.keys where key.hasPrefix("thread-client-id-v1:") {
             let threadKey = String(key.dropFirst("thread-client-id-v1:".count)).removingPercentEncoding ?? ""
@@ -162,7 +218,8 @@ final class TaskActivityMonitor {
             guard message["version"] as? Int == 11, let host = params["hostId"] as? String,
                   let id = params["conversationId"] as? String, let change = params["change"] as? [String: Any] else { return }
             let key = "\(host):\(id)"
-            var status = statuses[key] ?? TaskStatus(revision: -1, running: false, owner: source)
+            var status = statuses[key] ?? TaskStatus(revision: -1, running: false, owner: source,
+                id: id, host: host, updatedAt: 0)
             status.owner = source
             if status.apply(change) { statuses[key] = status } else { subscribe(key) }
         case "thread-read-state-changed": poll()
@@ -177,7 +234,7 @@ final class TaskActivityMonitor {
     }
 
     private func publish() {
-        let value = TaskActivity.resolve(running: statuses.values.contains(where: { $0.running }), unread: unread)
+        let value = TaskActivity.resolve(running: statuses.values.contains(where: { $0.running }), unread: !unreadKeys.isEmpty)
         guard value != current else { return }
         current = value
         DispatchQueue.main.async { [weak self] in self?.onChange?(value) }
@@ -188,7 +245,12 @@ func activitySelfTest() {
     precondition(TaskActivity.resolve(running: true, unread: true) == .unread)
     precondition(TaskActivity.resolve(running: true, unread: false) == .running)
     precondition(TaskActivity.resolve(running: false, unread: false) == .idle)
-    var status = TaskStatus(revision: -1, running: false, owner: "test")
+    precondition(TaskLauncher.url(for: .init(id: "00000000-0000-4000-8000-000000000001", host: "local"), vscode: true)?.absoluteString
+        == "vscode://codex/local/00000000-0000-4000-8000-000000000001")
+    precondition(TaskLauncher.url(for: .init(id: "00000000-0000-4000-8000-000000000001", host: "local"), vscode: false)?.absoluteString
+        == "codex://threads/00000000-0000-4000-8000-000000000001")
+    var status = TaskStatus(revision: -1, running: false, owner: "test",
+        id: "00000000-0000-4000-8000-000000000001", host: "local", updatedAt: 0)
     precondition(status.apply(["type": "snapshot", "revision": 1, "conversationState": ["threadRuntimeStatus": ["type": "active"]]]))
     precondition(status.running)
     precondition(status.apply(["type": "patches", "baseRevision": 1, "revision": 2,
@@ -198,5 +260,5 @@ func activitySelfTest() {
     precondition(status.apply(["type": "patches", "baseRevision": 2, "revision": 4,
         "patches": [["path": ["threadRuntimeStatus"], "value": ["type": "active"]]]]))
     precondition(status.running)
-    print("PASS: live task snapshot, completion patch, revision gap, runtime replacement")
+    print("PASS: live task state, revision recovery, Codex and VS Code task links")
 }

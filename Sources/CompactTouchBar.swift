@@ -92,7 +92,7 @@ final class QuotaView: NSView {
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(motionChanged), name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
-        setAccessibilityLabel("Codex 额度，点击刷新")
+        setAccessibilityLabel("Codex 额度，点击打开任务")
     }
     deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
