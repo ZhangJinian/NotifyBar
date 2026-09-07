@@ -5,6 +5,8 @@ struct OpenCodeLocation: Equatable {
     var location = "Terminal"
     var activity: TaskActivity = .unread
     var hostPID: pid_t?
+    var tty = ""
+    var directory = ""
 }
 
 struct OpenCodeState: Equatable {
@@ -18,6 +20,10 @@ final class OpenCodeView: NSButton {
     var onTap: (() -> Void)?
     private var lights: [CAShapeLayer] = []
     private static let icon = Bundle.main.url(forResource: "opencode", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
+    private var groups: [(String, [OpenCodeLocation])] {
+        let grouped = Dictionary(grouping: displayState.locations, by: \.location)
+        return grouped.keys.sorted { $0 == "VS Code" && $1 != "VS Code" }.map { ($0, grouped[$0]!) }
+    }
 
     init() {
         super.init(frame: NSRect(origin: .zero, size: Self.blockSize))
@@ -37,18 +43,22 @@ final class OpenCodeView: NSButton {
         lights = []
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium)]
         var x: CGFloat = 43
-        for location in displayState.locations {
-            let light = CAShapeLayer()
-            light.path = CGPath(ellipseIn: NSRect(x: x, y: 19, width: 6, height: 6), transform: nil)
-            light.fillColor = (location.activity == .running ? NSColor.systemGreen : NSColor.systemRed).cgColor
-            layer?.addSublayer(light); lights.append(light)
-            if location.activity == .running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                let animation = CABasicAnimation(keyPath: "opacity")
-                animation.fromValue = 0.3; animation.toValue = 1; animation.duration = 1.6
-                animation.autoreverses = true; animation.repeatCount = .infinity
-                light.add(animation, forKey: "breathe")
+        for (name, locations) in groups {
+            for location in locations {
+                let light = CAShapeLayer()
+                light.path = CGPath(ellipseIn: NSRect(x: x, y: 19, width: 6, height: 6), transform: nil)
+                let color: NSColor = location.activity == .running ? .systemBlue : location.activity == .unread ? .systemRed : .systemGreen
+                light.fillColor = color.cgColor
+                layer?.addSublayer(light); lights.append(light)
+                if location.activity == .running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    let animation = CABasicAnimation(keyPath: "opacity")
+                    animation.fromValue = 0.3; animation.toValue = 1; animation.duration = 1.6
+                    animation.autoreverses = true; animation.repeatCount = .infinity
+                    light.add(animation, forKey: "breathe")
+                }
+                x += 9
             }
-            x += 11 + ceil((location.location as NSString).size(withAttributes: attributes).width) + 9
+            x += ceil((name as NSString).size(withAttributes: attributes).width) + 9
         }
     }
 
@@ -59,10 +69,11 @@ final class OpenCodeView: NSButton {
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
         ("OpenCode" as NSString).draw(in: NSRect(x: 43, y: 1, width: 143, height: 14), withAttributes: attributes)
         var x: CGFloat = 54
-        for location in displayState.locations {
-            let width = ceil((location.location as NSString).size(withAttributes: attributes).width)
-            (location.location as NSString).draw(in: NSRect(x: x, y: 15, width: width, height: 14), withAttributes: attributes)
-            x += width + 20
+        for (name, locations) in groups {
+            x += CGFloat(locations.count * 9)
+            let width = ceil((name as NSString).size(withAttributes: attributes).width)
+            (name as NSString).draw(in: NSRect(x: x, y: 15, width: width, height: 14), withAttributes: attributes)
+            x += width + 9
         }
     }
 }
@@ -85,8 +96,14 @@ final class OpenCodeMonitor {
     func activate() {
         guard !locations.isEmpty else { return }
         let location = locations[selected]
-        guard let pid = location.hostPID, let app = NSRunningApplication(processIdentifier: pid) else { return }
-        app.activate(options: [.activateAllWindows])
+        queue.async { [weak self] in
+            if location.location == "Terminal", !location.tty.isEmpty {
+                let script = "tell application \"Terminal\" to repeat with w in windows\nrepeat with t in tabs of w\nif tty of t is \"/dev/\(location.tty)\" then\nset selected of t to true\nset index of w to 1\nactivate\nreturn\nend if\nend repeat\nend repeat"
+                _ = self?.output("/usr/bin/osascript", ["-e", script])
+            } else if let pid = location.hostPID, let app = NSRunningApplication(processIdentifier: pid) {
+                app.activate(options: [.activateAllWindows])
+            }
+        }
         guard locations.count > 1 else { return }
         selected = (selected + 1) % locations.count
     }
@@ -106,14 +123,14 @@ final class OpenCodeMonitor {
         let found = raw.split(separator: "\n").compactMap { pid_t($0) }.map { pid -> OpenCodeLocation in
             let cwd = output("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-d", "cwd", "-Fn"])?.split(separator: "\n").first(where: { $0.hasPrefix("n/") }).map { String($0.dropFirst()) } ?? ""
             let host = hostApp(startingAt: pid)
-            return OpenCodeLocation(location: host.name,
-                activity: latestAssistantRunning(in: cwd) ? .running : .unread, hostPID: host.pid)
+            let tty = output("/bin/ps", ["-p", "\(pid)", "-o", "tty="]) ?? ""
+            let activity: TaskActivity = latestNeedsAttention(in: cwd) ? .unread : latestAssistantRunning(in: cwd) ? .running : .idle
+            return OpenCodeLocation(location: host.name, activity: activity, hostPID: host.pid, tty: tty, directory: cwd)
         }
-        let grouped = Dictionary(grouping: found, by: { $0.location })
-        let preferred = grouped.values.compactMap { group in
-            group.first(where: { $0.activity == .running }) ?? group.first
+        let next = found.sorted {
+            if $0.location != $1.location { return $0.location == "VS Code" }
+            return $0.tty < $1.tty
         }
-        let next = preferred.sorted { $0.location == "VS Code" && $1.location != "VS Code" }
         DispatchQueue.main.async { [weak self] in self?.apply(next) }
     }
 
@@ -144,6 +161,10 @@ final class OpenCodeMonitor {
     }
     private func latestAssistantRunning(in cwd: String) -> Bool {
         sql(cwd, expression: "CASE WHEN json_extract(m.data,'$.role')='assistant' AND json_extract(m.data,'$.time.completed') IS NULL THEN '1' ELSE '0' END") == "1"
+    }
+    private func latestNeedsAttention(in cwd: String) -> Bool {
+        let expression = "EXISTS(SELECT 1 FROM part p WHERE p.session_id=s.id AND json_extract(p.data,'$.type')='tool' AND json_extract(p.data,'$.state.status')='pending')"
+        return sql(cwd, expression: expression) == "1"
     }
     private func publish(_ next: OpenCodeState) {
         guard next != state else { return }; state = next; onChange?(next)

@@ -3,12 +3,13 @@ import Darwin
 
 enum TaskActivity: String {
     case idle, running, unread
-    static func resolve(running: Bool, unread: Bool) -> Self { unread ? .unread : running ? .running : .idle }
+    static func resolve(running: Bool, attention: Bool) -> Self { attention ? .unread : running ? .running : .idle }
 }
 
 struct TaskStatus {
     var revision: Int
     var running: Bool
+    var attention: Bool
     var owner: String
     var id: String
     var host: String
@@ -17,22 +18,57 @@ struct TaskStatus {
     mutating func apply(_ change: [String: Any]) -> Bool {
         guard let next = change["revision"] as? Int else { return false }
         if change["type"] as? String == "snapshot", let state = change["conversationState"] as? [String: Any] {
-            running = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String == "active"
+            let runtime = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String ?? ""
+            running = runtime == "active"
+            attention = Self.needsAttention(state)
             updatedAt = (state["updatedAt"] as? NSNumber)?.doubleValue ?? updatedAt
         } else if change["type"] as? String == "patches", change["baseRevision"] as? Int == revision,
                   let patches = change["patches"] as? [[String: Any]] {
             for patch in patches {
                 let path = patch["path"] as? [Any] ?? []
                 if path.isEmpty, let state = patch["value"] as? [String: Any] {
-                    running = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String == "active"
+                    let runtime = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String ?? ""
+                    running = runtime == "active"; attention = Self.needsAttention(state)
                 } else if path.first as? String == "threadRuntimeStatus" {
                     if path.count == 1 { running = (patch["value"] as? [String: Any])?["type"] as? String == "active" }
                     else if path.count == 2, path[1] as? String == "type" { running = patch["value"] as? String == "active" }
+                }
+                let key = path.compactMap { $0 as? String }.joined().lowercased()
+                if key.contains("approval") || key.contains("permission") || key.contains("userinput") {
+                    attention = Self.isPending(patch["value"])
                 }
             }
         } else { return false }
         revision = next
         return true
+    }
+
+    private static func needsAttention(_ value: Any) -> Bool {
+        if let dictionary = value as? [String: Any] {
+            for (key, child) in dictionary {
+                let lowered = key.lowercased()
+                if (lowered.contains("approval") || lowered.contains("permission") || lowered.contains("userinput")), isPending(child) { return true }
+                if needsAttention(child) { return true }
+            }
+        } else if let array = value as? [Any] { return array.contains(where: needsAttention) }
+        else if let text = value as? String {
+            let lowered = text.lowercased()
+            return lowered.contains("awaitingapproval") || lowered.contains("waitingforuserinput") || lowered.contains("requestuserinput")
+        }
+        return false
+    }
+
+    private static func isPending(_ value: Any?) -> Bool {
+        if let value = value as? Bool { return value }
+        if let value = value as? String {
+            let lowered = value.lowercased()
+            return lowered.contains("pending") || lowered.contains("waiting") || lowered.contains("requested")
+        }
+        if let value = value as? [Any] { return !value.isEmpty }
+        if let value = value as? [String: Any] {
+            return value["status"].map(isPending) ?? value["state"].map(isPending) ?? !value.isEmpty
+        }
+        return false
     }
 }
 
@@ -106,8 +142,8 @@ final class TaskActivityMonitor {
 
     func openBestTask() {
         queue.async {
-            let unread = self.statuses.values.filter { self.unreadKeys.contains("\($0.host):\($0.id)") }
-            let target = (unread.max { $0.updatedAt < $1.updatedAt }
+            let attention = self.statuses.values.filter(\.attention)
+            let target = (attention.max { $0.updatedAt < $1.updatedAt }
                 ?? self.statuses.values.filter(\.running).max { $0.updatedAt < $1.updatedAt })
                 .map { TaskOpenTarget(id: $0.id, host: $0.host) }
             DispatchQueue.main.async { TaskLauncher.open(target) }
@@ -218,7 +254,7 @@ final class TaskActivityMonitor {
             guard message["version"] as? Int == 11, let host = params["hostId"] as? String,
                   let id = params["conversationId"] as? String, let change = params["change"] as? [String: Any] else { return }
             let key = "\(host):\(id)"
-            var status = statuses[key] ?? TaskStatus(revision: -1, running: false, owner: source,
+            var status = statuses[key] ?? TaskStatus(revision: -1, running: false, attention: false, owner: source,
                 id: id, host: host, updatedAt: 0)
             status.owner = source
             if status.apply(change) { statuses[key] = status } else { subscribe(key) }
@@ -234,7 +270,7 @@ final class TaskActivityMonitor {
     }
 
     private func publish() {
-        let value = TaskActivity.resolve(running: statuses.values.contains(where: { $0.running }), unread: !unreadKeys.isEmpty)
+        let value = TaskActivity.resolve(running: statuses.values.contains(where: { $0.running }), attention: statuses.values.contains(where: { $0.attention }))
         guard value != current else { return }
         current = value
         DispatchQueue.main.async { [weak self] in self?.onChange?(value) }
@@ -242,14 +278,14 @@ final class TaskActivityMonitor {
 }
 
 func activitySelfTest() {
-    precondition(TaskActivity.resolve(running: true, unread: true) == .unread)
-    precondition(TaskActivity.resolve(running: true, unread: false) == .running)
-    precondition(TaskActivity.resolve(running: false, unread: false) == .idle)
+    precondition(TaskActivity.resolve(running: true, attention: true) == .unread)
+    precondition(TaskActivity.resolve(running: true, attention: false) == .running)
+    precondition(TaskActivity.resolve(running: false, attention: false) == .idle)
     precondition(TaskLauncher.url(for: .init(id: "00000000-0000-4000-8000-000000000001", host: "local"), vscode: true)?.absoluteString
         == "vscode://codex/local/00000000-0000-4000-8000-000000000001")
     precondition(TaskLauncher.url(for: .init(id: "00000000-0000-4000-8000-000000000001", host: "local"), vscode: false)?.absoluteString
         == "codex://threads/00000000-0000-4000-8000-000000000001")
-    var status = TaskStatus(revision: -1, running: false, owner: "test",
+    var status = TaskStatus(revision: -1, running: false, attention: false, owner: "test",
         id: "00000000-0000-4000-8000-000000000001", host: "local", updatedAt: 0)
     precondition(status.apply(["type": "snapshot", "revision": 1, "conversationState": ["threadRuntimeStatus": ["type": "active"]]]))
     precondition(status.running)
@@ -260,5 +296,9 @@ func activitySelfTest() {
     precondition(status.apply(["type": "patches", "baseRevision": 2, "revision": 4,
         "patches": [["path": ["threadRuntimeStatus"], "value": ["type": "active"]]]]))
     precondition(status.running)
+    precondition(status.apply(["type": "snapshot", "revision": 5, "conversationState": [
+        "threadRuntimeStatus": ["type": "active"], "approvalRequest": ["status": "pending"]
+    ]]))
+    precondition(status.attention)
     print("PASS: live task state, revision recovery, Codex and VS Code task links")
 }

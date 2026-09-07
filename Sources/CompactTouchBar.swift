@@ -73,8 +73,8 @@ final class QuotaView: NSButton {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         border.removeAnimation(forKey: "breathe")
-        border.strokeColor = (activity == .unread ? NSColor.systemRed : NSColor(calibratedRed: 0.55, green: 0.8, blue: 1, alpha: 1)).cgColor
-        border.opacity = activity == .idle ? 0 : activity == .unread ? 0.9 : 0.5
+        border.strokeColor = (activity == .unread ? NSColor.systemRed : activity == .running ? NSColor.systemBlue : NSColor.systemGreen).cgColor
+        border.opacity = activity == .unread ? 0.9 : activity == .running ? 0.5 : 0.65
         if activity == .running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             let animation = CABasicAnimation(keyPath: "opacity")
             animation.fromValue = 0.2

@@ -26,7 +26,7 @@ open build/mytouchbar.app
 
 原 CodexBar 用 `presentSystemModalTouchBar:systemTrayItemIdentifier:` 绕过前台应用 responder chain，所以切换应用后仍可见。本版本复用这个后台展示方式，但把 650 点的大视图改为 198 点小块，通过 `[额度项, OpenCode项, flexibleSpace]` 左对齐。
 
-OpenCode 进程存在时自动加入另一个 198 × 30 点小块，退出后自动移除。第一行显示 `OpenCode`，第二行横向显示所有已打开位置，例如 `● VS Code  ● Terminal`。绿色呼吸灯表示进行中，红灯表示已完成；连续点击按显示顺序轮流激活对应位置。
+OpenCode 进程存在时自动加入另一个 198 × 30 点小块，退出后自动移除。第一行显示 `OpenCode`，第二行横向显示所有已打开位置，例如 `● ● Terminal  ● VS Code`；同一位置的每个 OpenCode 实例各有一个灯。蓝色呼吸表示工作中，绿色表示完成，红色表示等待授权或用户操作；连续点击按实例顺序轮流激活。
 
 macOS 系统模态接口仍管理整个左侧应用区域。空余位置可添加 **mytouchbar 自己的其他块**，不能自动混入前台其他应用的按钮。右侧系统控制区由系统管理。私有接口未来可能变化；实际物理位置以设备显示为准。
 
@@ -51,9 +51,9 @@ build/mytouchbar.app/Contents/MacOS/mytouchbar --preview /tmp/mytouchbar-preview
 
 ## 任务与未读边框
 
-- 有运行中任务：淡蓝色细边框，约 3.2 秒一个呼吸周期。系统开启“减少动态效果”时常亮。
-- 有未读任务消息：红色常亮，优先级高于蓝框。在 ChatGPT/Codex 查看相应消息后，边框随应用已读状态恢复。
-- 没有运行中或未读任务：无彩色边框。点击小块打开 Codex 主界面。
+- 有运行中任务：蓝色细边框，约 3.2 秒一个呼吸周期。系统开启“减少动态效果”时常亮。
+- 等待授权或用户输入：红色常亮，优先级高于蓝框。
+- 任务完成：绿色常亮。点击小块打开对应 Codex 任务。
 
 点击时优先打开最近更新的未读任务，其次是最近更新的运行中任务。VS Code 插件记录过的任务通过 `vscode://codex/local/<id>` 打开；其他任务通过 `codex://threads/<id>` 在 Codex 桌面应用打开。点击不会把消息标为已读，是否已读仍由对应应用决定。
 
