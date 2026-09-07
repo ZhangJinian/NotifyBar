@@ -81,6 +81,7 @@ final class OpenCodeView: NSButton {
 final class OpenCodeMonitor {
     var onChange: ((OpenCodeState) -> Void)?
     private let queue = DispatchQueue(label: "mytouchbar.opencode", qos: .utility)
+    private let activationQueue = DispatchQueue(label: "mytouchbar.opencode.activate", qos: .userInitiated)
     private var timer: Timer?
     private var state = OpenCodeState()
     private var locations: [OpenCodeLocation] = []
@@ -96,11 +97,14 @@ final class OpenCodeMonitor {
     func activate() {
         guard !locations.isEmpty else { return }
         let location = locations[selected]
-        queue.async { [weak self] in
+        if location.location == "VS Code", !location.directory.isEmpty {
+            var route = URLComponents()
+            route.scheme = "vscode"; route.host = "file"; route.path = location.directory
+            if let url = route.url { NSWorkspace.shared.open(url) }
+        }
+        activationQueue.async { [weak self] in
             if location.location == "VS Code", !location.directory.isEmpty {
-                let code = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
-                _ = self?.output(code, [location.directory])
-                let script = "delay 0.35\ntell application \"Visual Studio Code\" to activate\ntell application \"System Events\" to keystroke \"`\" using control down"
+                let script = "delay 0.12\ntell application \"Visual Studio Code\" to activate\ntell application \"System Events\" to keystroke \"`\" using control down"
                 _ = self?.output("/usr/bin/osascript", ["-e", script])
             } else if location.location == "Terminal", !location.tty.isEmpty {
                 let script = "tell application \"Terminal\" to repeat with w in windows\nrepeat with t in tabs of w\nif tty of t is \"/dev/\(location.tty)\" then\nset selected of t to true\nset index of w to 1\nactivate\nreturn\nend if\nend repeat\nend repeat"
