@@ -26,7 +26,7 @@ open build/mytouchbar.app
 
 原 CodexBar 用 `presentSystemModalTouchBar:systemTrayItemIdentifier:` 绕过前台应用 responder chain，所以切换应用后仍可见。本版本复用这个后台展示方式，但把 650 点的大视图改为 198 点小块，通过 `[额度项, OpenCode项, flexibleSpace]` 左对齐。
 
-OpenCode 进程存在时自动加入另一个 198 × 30 点小块，退出后自动移除。第一行显示 `OpenCode`，第二行横向显示所有已打开位置，例如 `● ● Terminal  ● VS Code`；同一位置的每个 OpenCode 实例各有一个灯。蓝色呼吸表示工作中，绿色表示完成，红色表示等待授权或用户操作；连续点击按实例顺序轮流激活。
+OpenCode 进程存在时自动加入另一个 198 × 30 点小块，退出后自动移除。第一行显示 `OpenCode`，第二行横向显示所有已打开位置，例如 `● ● Terminal  ● VS Code`；同一位置的每个 OpenCode 实例各有一个灯。蓝色呼吸表示工作中，绿色表示完成，红色表示等待授权或用户操作；连续点击按实例顺序轮流激活。Terminal 通过 TTY 定位具体标签页；VS Code 通过工作目录定位窗口并聚焦集成终端，首次使用可能出现 macOS 自动化权限提示。
 
 macOS 系统模态接口仍管理整个左侧应用区域。空余位置可添加 **mytouchbar 自己的其他块**，不能自动混入前台其他应用的按钮。右侧系统控制区由系统管理。私有接口未来可能变化；实际物理位置以设备显示为准。
 

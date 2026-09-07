@@ -68,7 +68,7 @@ final class OpenCodeView: NSButton {
         Self.icon?.draw(in: NSRect(x: 12, y: 4, width: 22, height: 22))
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
         ("OpenCode" as NSString).draw(in: NSRect(x: 43, y: 1, width: 143, height: 14), withAttributes: attributes)
-        var x: CGFloat = 54
+        var x: CGFloat = 43
         for (name, locations) in groups {
             x += CGFloat(locations.count * 9)
             let width = ceil((name as NSString).size(withAttributes: attributes).width)
@@ -97,7 +97,12 @@ final class OpenCodeMonitor {
         guard !locations.isEmpty else { return }
         let location = locations[selected]
         queue.async { [weak self] in
-            if location.location == "Terminal", !location.tty.isEmpty {
+            if location.location == "VS Code", !location.directory.isEmpty {
+                let code = "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+                _ = self?.output(code, [location.directory])
+                let script = "delay 0.35\ntell application \"Visual Studio Code\" to activate\ntell application \"System Events\" to keystroke \"`\" using control down"
+                _ = self?.output("/usr/bin/osascript", ["-e", script])
+            } else if location.location == "Terminal", !location.tty.isEmpty {
                 let script = "tell application \"Terminal\" to repeat with w in windows\nrepeat with t in tabs of w\nif tty of t is \"/dev/\(location.tty)\" then\nset selected of t to true\nset index of w to 1\nactivate\nreturn\nend if\nend repeat\nend repeat"
                 _ = self?.output("/usr/bin/osascript", ["-e", script])
             } else if let pid = location.hostPID, let app = NSRunningApplication(processIdentifier: pid) {
@@ -124,7 +129,7 @@ final class OpenCodeMonitor {
             let cwd = output("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-d", "cwd", "-Fn"])?.split(separator: "\n").first(where: { $0.hasPrefix("n/") }).map { String($0.dropFirst()) } ?? ""
             let host = hostApp(startingAt: pid)
             let tty = output("/bin/ps", ["-p", "\(pid)", "-o", "tty="]) ?? ""
-            let activity: TaskActivity = latestNeedsAttention(in: cwd) ? .unread : latestAssistantRunning(in: cwd) ? .running : .idle
+            let activity: TaskActivity = latestNeedsAttention(in: cwd) ? .unread : processIsWorking(pid) ? .running : .idle
             return OpenCodeLocation(location: host.name, activity: activity, hostPID: host.pid, tty: tty, directory: cwd)
         }
         let next = found.sorted {
@@ -146,7 +151,7 @@ final class OpenCodeMonitor {
         for _ in 0..<12 {
             guard let line = output("/bin/ps", ["-p", "\(current)", "-o", "ppid="]), let parent = pid_t(line) else { break }
             if let app = NSRunningApplication(processIdentifier: parent), let bundle = app.bundleIdentifier {
-                if bundle == "com.microsoft.VSCode" || bundle.hasPrefix("com.microsoft.VSCode") { return ("VS Code", parent) }
+                if bundle == "com.microsoft.VSCode" || bundle == "com.microsoft.VSCodeInsiders" { return ("VS Code", parent) }
                 if bundle == "com.apple.Terminal" { return ("Terminal", parent) }
             }
             current = parent
@@ -159,8 +164,10 @@ final class OpenCodeMonitor {
         let escaped = cwd.replacingOccurrences(of: "'", with: "''")
         return output("/usr/bin/sqlite3", [path, "SELECT \(expression) FROM message m JOIN session s ON s.id=m.session_id WHERE s.directory='\(escaped)' ORDER BY m.time_created DESC LIMIT 1;"]) ?? ""
     }
-    private func latestAssistantRunning(in cwd: String) -> Bool {
-        sql(cwd, expression: "CASE WHEN json_extract(m.data,'$.role')='assistant' AND json_extract(m.data,'$.time.completed') IS NULL THEN '1' ELSE '0' END") == "1"
+    private func processIsWorking(_ pid: pid_t) -> Bool {
+        let network = output("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-i", "-sTCP:ESTABLISHED"])
+        // ponytail: network activity identifies the exact process; add OpenCode's per-process API if local-only tool runs must be distinguished.
+        return (network?.split(separator: "\n").count ?? 0) > 1
     }
     private func latestNeedsAttention(in cwd: String) -> Bool {
         let expression = "EXISTS(SELECT 1 FROM part p WHERE p.session_id=s.id AND json_extract(p.data,'$.type')='tool' AND json_extract(p.data,'$.state.status')='pending')"

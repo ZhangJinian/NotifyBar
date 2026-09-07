@@ -20,7 +20,7 @@ struct TaskStatus {
         if change["type"] as? String == "snapshot", let state = change["conversationState"] as? [String: Any] {
             let runtime = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String ?? ""
             running = runtime == "active"
-            attention = Self.needsAttention(state)
+            attention = Self.runtimeNeedsAttention(runtime)
             updatedAt = (state["updatedAt"] as? NSNumber)?.doubleValue ?? updatedAt
         } else if change["type"] as? String == "patches", change["baseRevision"] as? Int == revision,
                   let patches = change["patches"] as? [[String: Any]] {
@@ -28,14 +28,16 @@ struct TaskStatus {
                 let path = patch["path"] as? [Any] ?? []
                 if path.isEmpty, let state = patch["value"] as? [String: Any] {
                     let runtime = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String ?? ""
-                    running = runtime == "active"; attention = Self.needsAttention(state)
+                    running = runtime == "active"; attention = Self.runtimeNeedsAttention(runtime)
                 } else if path.first as? String == "threadRuntimeStatus" {
-                    if path.count == 1 { running = (patch["value"] as? [String: Any])?["type"] as? String == "active" }
+                    if path.count == 1 {
+                        let runtime = (patch["value"] as? [String: Any])?["type"] as? String ?? ""
+                        running = runtime == "active"; attention = Self.runtimeNeedsAttention(runtime)
+                    }
                     else if path.count == 2, path[1] as? String == "type" { running = patch["value"] as? String == "active" }
                 }
-                let key = path.compactMap { $0 as? String }.joined().lowercased()
-                if key.contains("approval") || key.contains("permission") || key.contains("userinput") {
-                    attention = Self.isPending(patch["value"])
+                if path.first as? String == "threadRuntimeStatus", let value = patch["value"] as? String {
+                    attention = Self.runtimeNeedsAttention(value)
                 }
             }
         } else { return false }
@@ -43,32 +45,9 @@ struct TaskStatus {
         return true
     }
 
-    private static func needsAttention(_ value: Any) -> Bool {
-        if let dictionary = value as? [String: Any] {
-            for (key, child) in dictionary {
-                let lowered = key.lowercased()
-                if (lowered.contains("approval") || lowered.contains("permission") || lowered.contains("userinput")), isPending(child) { return true }
-                if needsAttention(child) { return true }
-            }
-        } else if let array = value as? [Any] { return array.contains(where: needsAttention) }
-        else if let text = value as? String {
-            let lowered = text.lowercased()
-            return lowered.contains("awaitingapproval") || lowered.contains("waitingforuserinput") || lowered.contains("requestuserinput")
-        }
-        return false
-    }
-
-    private static func isPending(_ value: Any?) -> Bool {
-        if let value = value as? Bool { return value }
-        if let value = value as? String {
-            let lowered = value.lowercased()
-            return lowered.contains("pending") || lowered.contains("waiting") || lowered.contains("requested")
-        }
-        if let value = value as? [Any] { return !value.isEmpty }
-        if let value = value as? [String: Any] {
-            return value["status"].map(isPending) ?? value["state"].map(isPending) ?? !value.isEmpty
-        }
-        return false
+    private static func runtimeNeedsAttention(_ value: String) -> Bool {
+        let lowered = value.lowercased()
+        return lowered.contains("approval") || lowered.contains("permission") || lowered.contains("waiting") || lowered.contains("input")
     }
 }
 
@@ -296,9 +275,7 @@ func activitySelfTest() {
     precondition(status.apply(["type": "patches", "baseRevision": 2, "revision": 4,
         "patches": [["path": ["threadRuntimeStatus"], "value": ["type": "active"]]]]))
     precondition(status.running)
-    precondition(status.apply(["type": "snapshot", "revision": 5, "conversationState": [
-        "threadRuntimeStatus": ["type": "active"], "approvalRequest": ["status": "pending"]
-    ]]))
+    precondition(status.apply(["type": "snapshot", "revision": 5, "conversationState": ["threadRuntimeStatus": ["type": "waitingForApproval"]]]))
     precondition(status.attention)
     print("PASS: live task state, revision recovery, Codex and VS Code task links")
 }
