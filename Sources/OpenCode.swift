@@ -39,7 +39,7 @@ final class OpenCodeView: NSButton {
         var x: CGFloat = 43
         for location in displayState.locations {
             let light = CAShapeLayer()
-            light.path = CGPath(ellipseIn: NSRect(x: x, y: 5, width: 6, height: 6), transform: nil)
+            light.path = CGPath(ellipseIn: NSRect(x: x, y: 19, width: 6, height: 6), transform: nil)
             light.fillColor = (location.activity == .running ? NSColor.systemGreen : NSColor.systemRed).cgColor
             layer?.addSublayer(light); lights.append(light)
             if location.activity == .running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -57,11 +57,11 @@ final class OpenCodeView: NSButton {
         NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
         Self.icon?.draw(in: NSRect(x: 12, y: 4, width: 22, height: 22))
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
-        ("OpenCode" as NSString).draw(in: NSRect(x: 43, y: 15, width: 143, height: 14), withAttributes: attributes)
+        ("OpenCode" as NSString).draw(in: NSRect(x: 43, y: 1, width: 143, height: 14), withAttributes: attributes)
         var x: CGFloat = 54
         for location in displayState.locations {
             let width = ceil((location.location as NSString).size(withAttributes: attributes).width)
-            (location.location as NSString).draw(in: NSRect(x: x, y: 1, width: width, height: 14), withAttributes: attributes)
+            (location.location as NSString).draw(in: NSRect(x: x, y: 15, width: width, height: 14), withAttributes: attributes)
             x += width + 20
         }
     }
@@ -69,14 +69,17 @@ final class OpenCodeView: NSButton {
 
 final class OpenCodeMonitor {
     var onChange: ((OpenCodeState) -> Void)?
+    private let queue = DispatchQueue(label: "mytouchbar.opencode", qos: .utility)
     private var timer: Timer?
     private var state = OpenCodeState()
     private var locations: [OpenCodeLocation] = []
     private var selected = 0
 
     func start() {
-        poll()
-        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.poll() }
+        queue.async { [weak self] in self?.poll() }
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.queue.async { [weak self] in self?.poll() }
+        }
     }
     func stop() { timer?.invalidate(); timer = nil }
     func activate() {
@@ -98,7 +101,7 @@ final class OpenCodeMonitor {
 
     private func poll() {
         guard let raw = output("/usr/bin/pgrep", ["-x", "opencode"]) else {
-            locations = []; selected = 0; publish(OpenCodeState()); return
+            DispatchQueue.main.async { [weak self] in self?.apply([]) }; return
         }
         let found = raw.split(separator: "\n").compactMap { pid_t($0) }.map { pid -> OpenCodeLocation in
             let cwd = output("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-d", "cwd", "-Fn"])?.split(separator: "\n").first(where: { $0.hasPrefix("n/") }).map { String($0.dropFirst()) } ?? ""
@@ -110,7 +113,12 @@ final class OpenCodeMonitor {
         let preferred = grouped.values.compactMap { group in
             group.first(where: { $0.activity == .running }) ?? group.first
         }
-        locations = preferred.sorted { $0.location == "VS Code" && $1.location != "VS Code" }
+        let next = preferred.sorted { $0.location == "VS Code" && $1.location != "VS Code" }
+        DispatchQueue.main.async { [weak self] in self?.apply(next) }
+    }
+
+    private func apply(_ next: [OpenCodeLocation]) {
+        locations = next
         if locations.isEmpty { selected = 0; publish(OpenCodeState()); return }
         selected = min(selected, locations.count - 1)
         publish(OpenCodeState(locations: locations))

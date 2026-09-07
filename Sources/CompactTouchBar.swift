@@ -143,7 +143,7 @@ final class QuotaView: NSButton {
 
         Self.icon?.draw(in: NSRect(x: startX, y: 4, width: 22, height: 22))
         for (index, row) in rows.enumerated() {
-            let y: CGFloat = index == 0 ? 15 : 1
+            let y: CGFloat = index == 0 ? 1 : 15
             let entries: [(String, CGFloat, CGFloat, NSColor)] = [
                 (row.0, titleX, titleWidth, color),
                 (row.1?.remaining ?? "--", remainingX, remainingWidth, quotaColor(for: row.1)),
