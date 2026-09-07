@@ -4,7 +4,13 @@ import QuartzCore
 // One compact block at the leading edge of a background-visible application bar.
 final class CompactTouchBar: NSObject, NSTouchBarDelegate {
     let item = NSCustomTouchBarItem(identifier: .init("local.mytouchbar.codex"))
+    let openCodeItem = NSCustomTouchBarItem(identifier: .init("local.mytouchbar.opencode"))
     private var presented: NSTouchBar?
+    private var openCodeVisible = false
+
+    private var identifiers: [NSTouchBarItem.Identifier] {
+        [item.identifier] + (openCodeVisible ? [openCodeItem.identifier] : []) + [.flexibleSpace]
+    }
 
     func show() -> Bool {
         let cls = NSTouchBar.self as AnyObject
@@ -15,10 +21,16 @@ final class CompactTouchBar: NSObject, NSTouchBarDelegate {
         bar.delegate = self
         // Trailing flexible space keeps the fixed-width quota block on the LEFT.
         // Future blocks belong before flexibleSpace; do not stretch the quota view.
-        bar.defaultItemIdentifiers = [item.identifier, .flexibleSpace]
+        bar.defaultItemIdentifiers = identifiers
         _ = cls.perform(selector, with: bar, with: nil)
         presented = bar
         return true
+    }
+
+    func setOpenCodeVisible(_ visible: Bool) {
+        guard visible != openCodeVisible else { return }
+        openCodeVisible = visible
+        presented?.defaultItemIdentifiers = identifiers
     }
 
     func hide() {
@@ -30,7 +42,7 @@ final class CompactTouchBar: NSObject, NSTouchBarDelegate {
     }
 
     func touchBar(_ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
-        identifier == item.identifier ? item : nil
+        identifier == item.identifier ? item : identifier == openCodeItem.identifier ? openCodeItem : nil
     }
 }
 

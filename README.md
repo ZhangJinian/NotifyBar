@@ -24,9 +24,11 @@ open build/mytouchbar.app
 
 小块放在 Touch Bar 左侧应用区域，固定 198 × 30 点；右侧系统 Control Strip 不再注册额度项。保持两行额度和重置时间，没有语音或电量条。
 
-原 CodexBar 用 `presentSystemModalTouchBar:systemTrayItemIdentifier:` 绕过前台应用 responder chain，所以切换应用后仍可见。本版本复用这个后台展示方式，但把 650 点的大视图改为 228 点小块，通过 `[额度项, flexibleSpace]` 左对齐。后续新块加在 `flexibleSpace` 前即可，不需要扩大额度块。
+原 CodexBar 用 `presentSystemModalTouchBar:systemTrayItemIdentifier:` 绕过前台应用 responder chain，所以切换应用后仍可见。本版本复用这个后台展示方式，但把 650 点的大视图改为 198 点小块，通过 `[额度项, OpenCode项, flexibleSpace]` 左对齐。
 
-注意：小块仅占 228 点，但 macOS 系统模态接口仍管理整个左侧应用区域。空余位置可添加 **mytouchbar 自己的其他块**，不能自动混入前台其他应用的按钮。右侧系统控制区由系统管理。私有接口未来可能变化；实际物理位置以设备显示为准。
+OpenCode 进程存在时自动加入另一个 198 × 30 点小块，退出后自动移除。第一行显示当前模型，第二行显示 `OpenCode · VS Code` 或 `OpenCode · 系统终端`；点击激活对应应用。运行时沿用淡蓝呼吸框，任务完成而窗口不在前台时显示红框，查看对应窗口后清除。
+
+macOS 系统模态接口仍管理整个左侧应用区域。空余位置可添加 **mytouchbar 自己的其他块**，不能自动混入前台其他应用的按钮。右侧系统控制区由系统管理。私有接口未来可能变化；实际物理位置以设备显示为准。
 
 更新后退出旧 mytouchbar，再启动新版本。旧 CodexBar 若仍显示，可从其菜单隐藏 Touch Bar，随后在 mytouchbar 菜单点“重新显示小块”。
 
@@ -63,6 +65,7 @@ build/mytouchbar.app/Contents/MacOS/mytouchbar --preview /tmp/mytouchbar-preview
 
 ```sh
 build/mytouchbar.app/Contents/MacOS/mytouchbar --activity-probe
+build/mytouchbar.app/Contents/MacOS/mytouchbar --opencode-probe
 build/mytouchbar.app/Contents/MacOS/mytouchbar --preview /tmp/mytouchbar-unread.png --unread
 build/mytouchbar.app/Contents/MacOS/mytouchbar --preview /tmp/mytouchbar-running.png --running
 ```

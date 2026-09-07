@@ -7,5 +7,7 @@ xcrun swiftc -O -target "$(uname -m)-apple-macosx12.0" -sdk "$(xcrun --sdk macos
     -module-cache-path "${TMPDIR:-/tmp}/mytouchbar-module-cache" \
     Sources/*.swift -o "$APP/Contents/MacOS/mytouchbar"
 cp Info.plist "$APP/Contents/Info.plist"
+mkdir -p "$APP/Contents/Resources"
+cp Resources/opencode.svg "$APP/Contents/Resources/opencode.svg"
 codesign --force --sign - "$APP"
 echo "$PWD/$APP"

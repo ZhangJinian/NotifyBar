@@ -5,6 +5,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let client = CodexAppServerClient()
     private let strip = CompactTouchBar()
     private let quota = QuotaView()
+    private let openCode = OpenCodeView()
+    private let openCodeMonitor = OpenCodeMonitor()
     private var statusItem: NSStatusItem!
     private var timer: Timer?
     private var refreshing = false
@@ -30,6 +32,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
         quota.onTap = { [weak self] in self?.activityMonitor.openBestTask() }
         strip.item.view = quota
+        strip.openCodeItem.view = openCode
+        openCode.onTap = { [weak self] in self?.openCodeMonitor.activate() }
+        openCodeMonitor.onChange = { [weak self] state in
+            self?.openCode.displayState = state
+            self?.strip.setOpenCodeVisible(state.visible)
+        }
+        openCodeMonitor.start()
         activityMonitor.onChange = { [weak self] in self?.quota.activity = $0 }
         activityMonitor.start()
         client.onRateLimitsUpdated = { [weak self] in self?.refresh() }
@@ -83,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         activityMonitor.stop()
+        openCodeMonitor.stop()
         timer?.invalidate()
         strip.hide()
         client.stop()
@@ -94,6 +104,7 @@ if CommandLine.arguments.contains("--self-test") {
     try selfTest()
     activitySelfTest()
     quotaColorSelfTest()
+    openCodeSelfTest()
 } else if let index = CommandLine.arguments.firstIndex(of: "--route-probe"), CommandLine.arguments.count > index + 1 {
     let target = TaskOpenTarget(id: CommandLine.arguments[index + 1], host: "local")
     print(TaskLauncher.preferredURL(for: target)?.absoluteString ?? "--")
@@ -102,6 +113,12 @@ if CommandLine.arguments.contains("--self-test") {
     monitor.onChange = { print("Activity: \($0.rawValue)") }
     monitor.start()
     RunLoop.current.run(until: Date().addingTimeInterval(8))
+    monitor.stop()
+} else if CommandLine.arguments.contains("--opencode-probe") {
+    let monitor = OpenCodeMonitor()
+    monitor.onChange = { print("OpenCode: visible=\($0.visible) model=\($0.model) location=\($0.location) activity=\($0.activity.rawValue)") }
+    monitor.start()
+    RunLoop.current.run(until: Date().addingTimeInterval(3))
     monitor.stop()
 } else if CommandLine.arguments.contains("--probe") {
     let client = CodexAppServerClient()
