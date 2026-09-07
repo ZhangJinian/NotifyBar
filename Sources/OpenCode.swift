@@ -1,18 +1,22 @@
 import AppKit
 import QuartzCore
 
-struct OpenCodeState: Equatable {
-    var visible = false
+struct OpenCodeLocation: Equatable {
     var location = "Terminal"
     var activity: TaskActivity = .unread
     var hostPID: pid_t?
+}
+
+struct OpenCodeState: Equatable {
+    var locations: [OpenCodeLocation] = []
+    var visible: Bool { !locations.isEmpty }
 }
 
 final class OpenCodeView: NSButton {
     static let blockSize = NSSize(width: 198, height: 30)
     var displayState = OpenCodeState() { didSet { needsDisplay = true; updateLight() } }
     var onTap: (() -> Void)?
-    private let light = CAShapeLayer()
+    private var lights: [CAShapeLayer] = []
     private static let icon = Bundle.main.url(forResource: "opencode", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
 
     init() {
@@ -22,8 +26,6 @@ final class OpenCodeView: NSButton {
         widthAnchor.constraint(equalToConstant: Self.blockSize.width).isActive = true
         heightAnchor.constraint(equalToConstant: Self.blockSize.height).isActive = true
         wantsLayer = true
-        light.path = CGPath(ellipseIn: NSRect(x: 43, y: 5, width: 6, height: 6), transform: nil)
-        layer?.addSublayer(light)
         setAccessibilityElement(true); setAccessibilityRole(.button); setAccessibilityLabel("OpenCode，点击打开")
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -31,14 +33,22 @@ final class OpenCodeView: NSButton {
     @objc private func tapped() { onTap?() }
 
     private func updateLight() {
-        light.removeAnimation(forKey: "breathe")
-        light.fillColor = (displayState.activity == .running ? NSColor.systemGreen : NSColor.systemRed).cgColor
-        light.opacity = 1
-        if displayState.activity == .running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            let animation = CABasicAnimation(keyPath: "opacity")
-            animation.fromValue = 0.3; animation.toValue = 1; animation.duration = 1.6
-            animation.autoreverses = true; animation.repeatCount = .infinity
-            light.add(animation, forKey: "breathe")
+        lights.forEach { $0.removeFromSuperlayer() }
+        lights = []
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium)]
+        var x: CGFloat = 43
+        for location in displayState.locations {
+            let light = CAShapeLayer()
+            light.path = CGPath(ellipseIn: NSRect(x: x, y: 5, width: 6, height: 6), transform: nil)
+            light.fillColor = (location.activity == .running ? NSColor.systemGreen : NSColor.systemRed).cgColor
+            layer?.addSublayer(light); lights.append(light)
+            if location.activity == .running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                let animation = CABasicAnimation(keyPath: "opacity")
+                animation.fromValue = 0.3; animation.toValue = 1; animation.duration = 1.6
+                animation.autoreverses = true; animation.repeatCount = .infinity
+                light.add(animation, forKey: "breathe")
+            }
+            x += 11 + ceil((location.location as NSString).size(withAttributes: attributes).width) + 9
         }
     }
 
@@ -48,7 +58,12 @@ final class OpenCodeView: NSButton {
         Self.icon?.draw(in: NSRect(x: 12, y: 4, width: 22, height: 22))
         let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
         ("OpenCode" as NSString).draw(in: NSRect(x: 43, y: 15, width: 143, height: 14), withAttributes: attributes)
-        (displayState.location as NSString).draw(in: NSRect(x: 54, y: 1, width: 132, height: 14), withAttributes: attributes)
+        var x: CGFloat = 54
+        for location in displayState.locations {
+            let width = ceil((location.location as NSString).size(withAttributes: attributes).width)
+            (location.location as NSString).draw(in: NSRect(x: x, y: 1, width: width, height: 14), withAttributes: attributes)
+            x += width + 20
+        }
     }
 }
 
@@ -56,7 +71,7 @@ final class OpenCodeMonitor {
     var onChange: ((OpenCodeState) -> Void)?
     private var timer: Timer?
     private var state = OpenCodeState()
-    private var locations: [OpenCodeState] = []
+    private var locations: [OpenCodeLocation] = []
     private var selected = 0
 
     func start() {
@@ -65,11 +80,12 @@ final class OpenCodeMonitor {
     }
     func stop() { timer?.invalidate(); timer = nil }
     func activate() {
-        guard let pid = state.hostPID, let app = NSRunningApplication(processIdentifier: pid) else { return }
+        guard !locations.isEmpty else { return }
+        let location = locations[selected]
+        guard let pid = location.hostPID, let app = NSRunningApplication(processIdentifier: pid) else { return }
         app.activate(options: [.activateAllWindows])
         guard locations.count > 1 else { return }
         selected = (selected + 1) % locations.count
-        publish(locations[selected])
     }
 
     private func output(_ launchPath: String, _ arguments: [String]) -> String? {
@@ -84,10 +100,10 @@ final class OpenCodeMonitor {
         guard let raw = output("/usr/bin/pgrep", ["-x", "opencode"]) else {
             locations = []; selected = 0; publish(OpenCodeState()); return
         }
-        let found = raw.split(separator: "\n").compactMap { pid_t($0) }.map { pid -> OpenCodeState in
+        let found = raw.split(separator: "\n").compactMap { pid_t($0) }.map { pid -> OpenCodeLocation in
             let cwd = output("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-d", "cwd", "-Fn"])?.split(separator: "\n").first(where: { $0.hasPrefix("n/") }).map { String($0.dropFirst()) } ?? ""
             let host = hostApp(startingAt: pid)
-            return OpenCodeState(visible: true, location: host.name,
+            return OpenCodeLocation(location: host.name,
                 activity: latestAssistantRunning(in: cwd) ? .running : .unread, hostPID: host.pid)
         }
         let grouped = Dictionary(grouping: found, by: { $0.location })
@@ -97,7 +113,7 @@ final class OpenCodeMonitor {
         locations = preferred.sorted { $0.location == "VS Code" && $1.location != "VS Code" }
         if locations.isEmpty { selected = 0; publish(OpenCodeState()); return }
         selected = min(selected, locations.count - 1)
-        publish(locations[selected])
+        publish(OpenCodeState(locations: locations))
     }
 
     private func hostApp(startingAt pid: pid_t) -> (name: String, pid: pid_t?) {
@@ -127,6 +143,7 @@ final class OpenCodeMonitor {
 }
 
 func openCodeSelfTest() {
-    precondition(OpenCodeState(visible: true, location: "VS Code", activity: .running, hostPID: 1).location == "VS Code")
-    print("PASS: OpenCode location state")
+    let state = OpenCodeState(locations: [.init(location: "VS Code", activity: .running, hostPID: 1), .init()])
+    precondition(state.visible && state.locations.map(\.location) == ["VS Code", "Terminal"])
+    print("PASS: OpenCode horizontal locations")
 }
