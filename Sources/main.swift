@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         statusItem.menu = menu
-        quota.refresh = { [weak self] in self?.activityMonitor.openBestTask() }
+        quota.onTap = { [weak self] in self?.activityMonitor.openBestTask() }
         strip.item.view = quota
         activityMonitor.onChange = { [weak self] in self?.quota.activity = $0 }
         activityMonitor.start()

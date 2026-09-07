@@ -34,12 +34,12 @@ final class CompactTouchBar: NSObject, NSTouchBarDelegate {
     }
 }
 
-final class QuotaView: NSView {
+final class QuotaView: NSButton {
     static let blockSize = NSSize(width: 198, height: 30)
     var fiveHour: RateLimitWindow?
     var weekly: RateLimitWindow?
     var stale = false
-    var refresh: (() -> Void)?
+    var onTap: (() -> Void)?
     private let border = CAShapeLayer()
     var activity: TaskActivity = .idle { didSet { updateBorder() } }
     static let icon = NSImage(contentsOfFile: "/Applications/ChatGPT.app/Contents/Resources/icon-chatgpt.png")
@@ -80,6 +80,10 @@ final class QuotaView: NSView {
 
     init() {
         super.init(frame: NSRect(origin: .zero, size: Self.blockSize))
+        title = ""
+        isBordered = false
+        target = self
+        action = #selector(tapped)
         translatesAutoresizingMaskIntoConstraints = false
         widthAnchor.constraint(equalToConstant: Self.blockSize.width).isActive = true
         heightAnchor.constraint(equalToConstant: Self.blockSize.height).isActive = true
@@ -97,8 +101,7 @@ final class QuotaView: NSView {
     deinit { NSWorkspace.shared.notificationCenter.removeObserver(self) }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var intrinsicContentSize: NSSize { Self.blockSize }
-    override func mouseDown(with event: NSEvent) { refresh?() }
-    override func accessibilityPerformPress() -> Bool { refresh?(); return true }
+    @objc private func tapped() { onTap?() }
 
     func updateAccessibility() {
         setAccessibilityHelp(activity == .unread ? "有未读消息" : activity == .running ? "有任务进行中" : "没有运行中或未读任务")
