@@ -153,9 +153,11 @@ final class OpenCodeMonitor {
         for group in Dictionary(grouping: processes, by: \.directory).values {
             let ordered = group.sorted { $0.startedAt < $1.startedAt }
             for (index, process) in ordered.enumerated() {
+                // A TUI can resume a session created before its process; with one process in a directory, use that directory's current session.
+                let after = ordered.count == 1 ? 0 : process.startedAt
                 let before = index + 1 < ordered.count ? ordered[index + 1].startedAt : nil
-                let attention = latestNeedsAttention(in: process.directory, after: process.startedAt, before: before)
-                let running = latestAssistantRunning(in: process.directory, after: process.startedAt, before: before)
+                let attention = latestNeedsAttention(in: process.directory, after: after, before: before)
+                let running = latestAssistantRunning(in: process.directory, after: after, before: before)
                 found.append(OpenCodeLocation(location: process.host.name, activity: attention ? .attention : running ? .running : .idle,
                     processPID: process.pid, hostPID: process.host.pid, tty: process.tty, directory: process.directory))
             }
@@ -209,14 +211,17 @@ final class OpenCodeMonitor {
         let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode/opencode.db").path
         let escaped = cwd.replacingOccurrences(of: "'", with: "''")
         let upper = before.map { " AND s.time_created < \($0)" } ?? ""
-        return output("/usr/bin/sqlite3", [path, "SELECT \(expression) FROM message m JOIN session s ON s.id=m.session_id WHERE s.directory='\(escaped)' AND s.time_created >= \(after)\(upper) ORDER BY m.time_created DESC LIMIT 1;"]) ?? ""
+        return output("/usr/bin/sqlite3", [path, "SELECT \(expression) FROM message m JOIN session s ON s.id=m.session_id WHERE s.directory='\(escaped)' AND s.time_created >= \(after)\(upper) ORDER BY s.time_updated DESC,m.time_created DESC LIMIT 1;"]) ?? ""
     }
     private func latestAssistantRunning(in cwd: String, after: Int64, before: Int64?) -> Bool {
         sql(cwd, after: after, before: before, expression: "CASE WHEN json_extract(m.data,'$.role')='assistant' AND json_extract(m.data,'$.time.completed') IS NULL THEN '1' ELSE '0' END") == "1"
     }
     private func latestNeedsAttention(in cwd: String, after: Int64, before: Int64?) -> Bool {
-        let expression = "EXISTS(SELECT 1 FROM part p WHERE p.session_id=s.id AND json_extract(p.data,'$.type')='tool' AND json_extract(p.data,'$.state.status')='pending')"
-        return sql(cwd, after: after, before: before, expression: expression) == "1"
+        let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode/opencode.db").path
+        let escaped = cwd.replacingOccurrences(of: "'", with: "''")
+        let upper = before.map { " AND s.time_created < \($0)" } ?? ""
+        let query = "SELECT EXISTS(SELECT 1 FROM part p JOIN session s ON s.id=p.session_id WHERE s.directory='\(escaped)' AND s.time_created >= \(after)\(upper) AND json_extract(p.data,'$.type')='tool' AND (json_extract(p.data,'$.state.status')='pending' OR (json_extract(p.data,'$.tool')='question' AND json_extract(p.data,'$.state.status')='running')));"
+        return output("/usr/bin/sqlite3", [path, query]) == "1"
     }
     private func publish(_ next: OpenCodeState) {
         guard next != state else { return }; state = next; onChange?(next)
