@@ -2,8 +2,10 @@ import AppKit
 import Darwin
 
 enum TaskActivity: String {
-    case idle, running, unread
-    static func resolve(running: Bool, attention: Bool) -> Self { attention ? .unread : running ? .running : .idle }
+    case idle, running, attention, unread
+    static func resolve(running: Bool, attention: Bool, unread: Bool) -> Self {
+        attention ? .attention : running ? .running : unread ? .unread : .idle
+    }
 }
 
 struct TaskStatus {
@@ -123,7 +125,8 @@ final class TaskActivityMonitor {
         queue.async {
             let attention = self.statuses.values.filter(\.attention)
             let target = (attention.max { $0.updatedAt < $1.updatedAt }
-                ?? self.statuses.values.filter(\.running).max { $0.updatedAt < $1.updatedAt })
+                ?? self.statuses.values.filter(\.running).max { $0.updatedAt < $1.updatedAt }
+                ?? self.statuses.values.filter { self.unreadKeys.contains("\($0.host):\($0.id)") }.max { $0.updatedAt < $1.updatedAt })
                 .map { TaskOpenTarget(id: $0.id, host: $0.host) }
             DispatchQueue.main.async { TaskLauncher.open(target) }
         }
@@ -249,7 +252,8 @@ final class TaskActivityMonitor {
     }
 
     private func publish() {
-        let value = TaskActivity.resolve(running: statuses.values.contains(where: { $0.running }), attention: statuses.values.contains(where: { $0.attention }))
+        let value = TaskActivity.resolve(running: statuses.values.contains(where: { $0.running }),
+            attention: statuses.values.contains(where: { $0.attention }), unread: !unreadKeys.isEmpty)
         guard value != current else { return }
         current = value
         DispatchQueue.main.async { [weak self] in self?.onChange?(value) }
@@ -257,9 +261,10 @@ final class TaskActivityMonitor {
 }
 
 func activitySelfTest() {
-    precondition(TaskActivity.resolve(running: true, attention: true) == .unread)
-    precondition(TaskActivity.resolve(running: true, attention: false) == .running)
-    precondition(TaskActivity.resolve(running: false, attention: false) == .idle)
+    precondition(TaskActivity.resolve(running: true, attention: true, unread: true) == .attention)
+    precondition(TaskActivity.resolve(running: true, attention: false, unread: true) == .running)
+    precondition(TaskActivity.resolve(running: false, attention: false, unread: true) == .unread)
+    precondition(TaskActivity.resolve(running: false, attention: false, unread: false) == .idle)
     precondition(TaskLauncher.url(for: .init(id: "00000000-0000-4000-8000-000000000001", host: "local"), vscode: true)?.absoluteString
         == "vscode://codex/local/00000000-0000-4000-8000-000000000001")
     precondition(TaskLauncher.url(for: .init(id: "00000000-0000-4000-8000-000000000001", host: "local"), vscode: false)?.absoluteString

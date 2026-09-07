@@ -3,7 +3,8 @@ import QuartzCore
 
 struct OpenCodeLocation: Equatable {
     var location = "Terminal"
-    var activity: TaskActivity = .unread
+    var activity: TaskActivity = .idle
+    var processPID: pid_t = 0
     var hostPID: pid_t?
     var tty = ""
     var directory = ""
@@ -55,7 +56,7 @@ final class OpenCodeView: NSButton {
             for location in locations {
                 let light = CAShapeLayer()
                 light.path = CGPath(ellipseIn: NSRect(x: x, y: 19, width: 6, height: 6), transform: nil)
-                let color: NSColor = location.activity == .running ? .systemBlue : location.activity == .unread ? .systemRed : .systemGreen
+                let color: NSColor = location.activity == .running ? .systemBlue : location.activity == .attention ? .systemOrange : location.activity == .unread ? .systemRed : .systemGreen
                 light.fillColor = color.cgColor
                 layer?.addSublayer(light); lights.append(light)
                 if location.activity == .running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -93,6 +94,7 @@ final class OpenCodeMonitor {
     private var timer: Timer?
     private var state = OpenCodeState()
     private var locations: [OpenCodeLocation] = []
+    private var unreadProcesses = Set<pid_t>()
     private var selected = 0
 
     func start() {
@@ -105,6 +107,11 @@ final class OpenCodeMonitor {
     func activate() {
         guard !locations.isEmpty else { return }
         let location = locations[selected]
+        if location.activity == .unread {
+            unreadProcesses.remove(location.processPID)
+            locations[selected].activity = .idle
+            publish(OpenCodeState(locations: locations))
+        }
         if location.location == "VS Code", !location.directory.isEmpty {
             var route = URLComponents()
             route.scheme = "vscode"; route.host = "file"; route.path = location.directory
@@ -149,8 +156,8 @@ final class OpenCodeMonitor {
                 let before = index + 1 < ordered.count ? ordered[index + 1].startedAt : nil
                 let attention = latestNeedsAttention(in: process.directory, after: process.startedAt, before: before)
                 let running = latestAssistantRunning(in: process.directory, after: process.startedAt, before: before)
-                found.append(OpenCodeLocation(location: process.host.name, activity: attention ? .unread : running ? .running : .idle,
-                    hostPID: process.host.pid, tty: process.tty, directory: process.directory))
+                found.append(OpenCodeLocation(location: process.host.name, activity: attention ? .attention : running ? .running : .idle,
+                    processPID: process.pid, hostPID: process.host.pid, tty: process.tty, directory: process.directory))
             }
         }
         let next = found.sorted {
@@ -161,7 +168,19 @@ final class OpenCodeMonitor {
     }
 
     private func apply(_ next: [OpenCodeLocation]) {
-        locations = next
+        let previous = Dictionary(uniqueKeysWithValues: locations.map { ($0.processPID, $0.activity) })
+        let live = Set(next.map(\.processPID))
+        unreadProcesses.formIntersection(live)
+        locations = next.map { location in
+            var location = location
+            if location.activity == .running || location.activity == .attention {
+                unreadProcesses.remove(location.processPID)
+            } else if previous[location.processPID] == .running || previous[location.processPID] == .attention {
+                unreadProcesses.insert(location.processPID)
+            }
+            if unreadProcesses.contains(location.processPID) { location.activity = .unread }
+            return location
+        }
         if locations.isEmpty { selected = 0; publish(OpenCodeState()); return }
         selected = min(selected, locations.count - 1)
         publish(OpenCodeState(locations: locations))

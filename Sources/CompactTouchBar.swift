@@ -73,8 +73,9 @@ final class QuotaView: NSButton {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         border.removeAnimation(forKey: "breathe")
-        border.strokeColor = (activity == .unread ? NSColor.systemRed : activity == .running ? NSColor.systemBlue : NSColor.systemGreen).cgColor
-        border.opacity = activity == .unread ? 0.9 : activity == .running ? 0.5 : 0.65
+        let color: NSColor = activity == .attention ? .systemOrange : activity == .unread ? .systemRed : .systemBlue
+        border.strokeColor = color.cgColor
+        border.opacity = activity == .idle ? 0 : activity == .running ? 0.5 : 0.9
         if activity == .running && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             let animation = CABasicAnimation(keyPath: "opacity")
             animation.fromValue = 0.2
@@ -116,7 +117,7 @@ final class QuotaView: NSButton {
     @objc private func tapped() { onTap?() }
 
     func updateAccessibility() {
-        setAccessibilityHelp(activity == .unread ? "有未读消息" : activity == .running ? "有任务进行中" : "没有运行中或未读任务")
+        setAccessibilityHelp(activity == .attention ? "等待批准或输入" : activity == .unread ? "有未读消息" : activity == .running ? "有任务进行中" : "空闲")
         setAccessibilityValue("5h 剩余 \(fiveHour?.remaining ?? "--")，\(fiveHour?.reset ?? "--")；7d 剩余 \(weekly?.remaining ?? "--")，\(weekly?.reset ?? "--")\(stale ? "；旧数据，刷新失败" : "")")
         needsDisplay = true
     }
