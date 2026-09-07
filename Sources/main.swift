@@ -116,7 +116,7 @@ if CommandLine.arguments.contains("--self-test") {
     monitor.stop()
 } else if CommandLine.arguments.contains("--opencode-probe") {
     let monitor = OpenCodeMonitor()
-    monitor.onChange = { print("OpenCode: visible=\($0.visible) model=\($0.model) location=\($0.location) activity=\($0.activity.rawValue)") }
+    monitor.onChange = { print("OpenCode: visible=\($0.visible) location=\($0.location) activity=\($0.activity.rawValue)") }
     monitor.start()
     RunLoop.current.run(until: Date().addingTimeInterval(3))
     monitor.stop()
