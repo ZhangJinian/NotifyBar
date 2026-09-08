@@ -1,6 +1,6 @@
 import AppKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let activityMonitor = TaskActivityMonitor()
     private let client = CodexAppServerClient()
     private let strip = CompactTouchBar()
@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var visible = false
     private var lastUpdate: Date?
     private let info = NSMenuItem(title: "正在读取额度…", action: nil, keyEquivalent: "")
+    private var codexTasks: [CodexMenuEntry] = []
+    private var openCodeTasks: [OpenCodeLocation] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -22,13 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.image = icon
         statusItem.button?.setAccessibilityLabel("mytouchbar Codex 额度")
         let menu = NSMenu()
-        menu.addItem(info)
-        menu.addItem(.separator())
-        for (title, action) in [("刷新额度", #selector(refresh)), ("重新显示小块", #selector(show)), ("隐藏小块", #selector(hide)), ("退出", #selector(quit))] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            menu.addItem(item)
-        }
+        menu.delegate = self
         statusItem.menu = menu
         quota.onTap = { [weak self] in self?.activityMonitor.openBestTask() }
         strip.item.view = quota
@@ -37,9 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openCodeMonitor.onChange = { [weak self] state in
             self?.openCode.displayState = state
             self?.strip.setOpenCodeVisible(state.visible)
+            self?.openCodeTasks = state.locations
         }
         openCodeMonitor.start()
         activityMonitor.onChange = { [weak self] in self?.quota.activity = $0 }
+        activityMonitor.onTasksChange = { [weak self] in self?.codexTasks = $0 }
         activityMonitor.start()
         client.onRateLimitsUpdated = { [weak self] in self?.refresh() }
         show()
@@ -55,6 +53,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func hide() { strip.hide(); visible = false }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func wake() { if visible { show() }; refresh() }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        menu.addItem(info); menu.addItem(.separator())
+        addSection("Codex", entries: codexTasks.map { ($0.title, $0.activity) }, action: #selector(openCodex(_:)), to: menu)
+        addSection("OpenCode", entries: openCodeTasks.map { ("\($0.title) · \($0.location)", $0.activity) }, action: #selector(openOpenCode(_:)), to: menu)
+        menu.addItem(.separator())
+        for (title, action) in [("刷新额度", #selector(refresh)), ("重新显示小块", #selector(show)), ("隐藏小块", #selector(hide)), ("退出", #selector(quit))] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item)
+        }
+    }
+
+    private func addSection(_ title: String, entries: [(String, TaskActivity)], action: Selector, to menu: NSMenu) {
+        let header = NSMenuItem(title: title, action: nil, keyEquivalent: ""); header.isEnabled = false; menu.addItem(header)
+        if entries.isEmpty { let empty = NSMenuItem(title: "  无对话", action: nil, keyEquivalent: ""); empty.isEnabled = false; menu.addItem(empty); return }
+        for (index, entry) in entries.enumerated() {
+            let item = NSMenuItem(title: "  \(entry.0) — \(statusName(entry.1))", action: action, keyEquivalent: "")
+            item.target = self; item.tag = index; item.image = statusIcon(entry.1); menu.addItem(item)
+        }
+    }
+
+    private func statusName(_ activity: TaskActivity) -> String {
+        switch activity { case .running: return "处理中"; case .attention: return "待操作"; case .unread: return "未读"; case .idle: return "空闲" }
+    }
+    private func statusIcon(_ activity: TaskActivity) -> NSImage {
+        let color: NSColor = switch activity {
+        case .running: .systemBlue
+        case .attention: .systemOrange
+        case .unread: .systemRed
+        case .idle: .systemGray
+        }
+        let image = NSImage(size: NSSize(width: 9, height: 9), flipped: false) { rect in
+            color.setFill(); NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill(); return true
+        }
+        image.accessibilityDescription = statusName(activity)
+        return image
+    }
+    @objc private func openCodex(_ sender: NSMenuItem) {
+        guard codexTasks.indices.contains(sender.tag) else { return }; activityMonitor.open(codexTasks[sender.tag])
+    }
+    @objc private func openOpenCode(_ sender: NSMenuItem) {
+        guard openCodeTasks.indices.contains(sender.tag) else { return }; openCodeMonitor.activate(processPID: openCodeTasks[sender.tag].processPID)
+    }
 
     @objc private func refresh() {
         guard !refreshing else { return }

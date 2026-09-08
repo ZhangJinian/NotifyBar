@@ -58,6 +58,13 @@ struct TaskOpenTarget: Equatable {
     let host: String
 }
 
+struct CodexMenuEntry: Equatable {
+    let id: String
+    let host: String
+    let title: String
+    let activity: TaskActivity
+}
+
 enum TaskLauncher {
     static func url(for target: TaskOpenTarget, vscode: Bool) -> URL? {
         let value = vscode && target.host == "local"
@@ -98,6 +105,7 @@ enum TaskLauncher {
 // Read-only desktop IPC follower: retains runtime flags, never conversation text.
 final class TaskActivityMonitor {
     var onChange: ((TaskActivity) -> Void)?
+    var onTasksChange: (([CodexMenuEntry]) -> Void)?
     private let queue = DispatchQueue(label: "mytouchbar.activity", qos: .utility)
     private let home = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CODEX_HOME"]
         ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path)
@@ -131,6 +139,8 @@ final class TaskActivityMonitor {
             DispatchQueue.main.async { TaskLauncher.open(target) }
         }
     }
+
+    func open(_ entry: CodexMenuEntry) { TaskLauncher.open(.init(id: entry.id, host: entry.host)) }
 
     private func disconnect() {
         socketHandle?.readabilityHandler = nil
@@ -254,9 +264,26 @@ final class TaskActivityMonitor {
     private func publish() {
         let value = TaskActivity.resolve(running: statuses.values.contains(where: { $0.running }),
             attention: statuses.values.contains(where: { $0.attention }), unread: !unreadKeys.isEmpty)
-        guard value != current else { return }
+        let titles = codexTitles()
+        let entries = statuses.values.sorted { $0.updatedAt > $1.updatedAt }.map { status in
+            CodexMenuEntry(id: status.id, host: status.host, title: titles[status.id] ?? status.id,
+                activity: status.attention ? .attention : status.running ? .running : unreadKeys.contains("\(status.host):\(status.id)") ? .unread : .idle)
+        }
+        let changed = value != current
         current = value
-        DispatchQueue.main.async { [weak self] in self?.onChange?(value) }
+        DispatchQueue.main.async { [weak self] in
+            if changed { self?.onChange?(value) }
+            self?.onTasksChange?(entries)
+        }
+    }
+
+    private func codexTitles() -> [String: String] {
+        guard let data = try? String(contentsOf: home.appendingPathComponent("session_index.jsonl"), encoding: .utf8) else { return [:] }
+        return data.split(separator: "\n").reduce(into: [:]) { result, line in
+            guard let json = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let id = json["id"] as? String, let title = json["thread_name"] as? String else { return }
+            result[id] = title
+        }
     }
 }
 

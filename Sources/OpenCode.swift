@@ -5,6 +5,7 @@ struct OpenCodeLocation: Equatable {
     var location = "Terminal"
     var activity: TaskActivity = .idle
     var processPID: pid_t = 0
+    var title = "OpenCode"
     var hostPID: pid_t?
     var tty = ""
     var directory = ""
@@ -131,6 +132,11 @@ final class OpenCodeMonitor {
         guard locations.count > 1 else { return }
         selected = (selected + 1) % locations.count
     }
+    func activate(processPID: pid_t) {
+        guard let index = locations.firstIndex(where: { $0.processPID == processPID }) else { return }
+        selected = index
+        activate()
+    }
 
     private func output(_ launchPath: String, _ arguments: [String]) -> String? {
         let process = Process(), pipe = Pipe()
@@ -159,7 +165,8 @@ final class OpenCodeMonitor {
                 let attention = latestNeedsAttention(in: process.directory, after: after, before: before)
                 let running = latestAssistantRunning(in: process.directory, after: after, before: before)
                 found.append(OpenCodeLocation(location: process.host.name, activity: attention ? .attention : running ? .running : .idle,
-                    processPID: process.pid, hostPID: process.host.pid, tty: process.tty, directory: process.directory))
+                    processPID: process.pid, title: latestTitle(in: process.directory, after: after, before: before),
+                    hostPID: process.host.pid, tty: process.tty, directory: process.directory))
             }
         }
         let next = found.sorted {
@@ -215,6 +222,10 @@ final class OpenCodeMonitor {
     }
     private func latestAssistantRunning(in cwd: String, after: Int64, before: Int64?) -> Bool {
         sql(cwd, after: after, before: before, expression: "CASE WHEN json_extract(m.data,'$.role')='assistant' AND json_extract(m.data,'$.time.completed') IS NULL THEN '1' ELSE '0' END") == "1"
+    }
+    private func latestTitle(in cwd: String, after: Int64, before: Int64?) -> String {
+        let title = sql(cwd, after: after, before: before, expression: "s.title")
+        return title.isEmpty ? URL(fileURLWithPath: cwd).lastPathComponent : title
     }
     private func latestNeedsAttention(in cwd: String, after: Int64, before: Int64?) -> Bool {
         let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode/opencode.db").path
