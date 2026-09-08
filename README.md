@@ -8,6 +8,20 @@ A lightweight macOS menu bar and Touch Bar utility for monitoring Codex quotas, 
 
 Built with Swift and AppKit, with no third-party runtime dependencies.
 
+## Screenshots
+
+### Touch Bar on hardware
+
+![Touch Bar on a MacBook](docs/images/touchbar-photo.png)
+
+Early-version hardware photo. The current version colors quota percentages according to the remaining allowance.
+
+### Current Codex block
+
+<img src="docs/images/touchbar-preview.png" width="396" alt="Codex quota block with a blue working-state border">
+
+Rendered by NotifyBar itself using sample quotas and reset times; shown at 2× size. Blue indicates a running task.
+
 ## Features
 
 - **Codex quotas:** remaining 5-hour and 7-day allowances with local reset times. Percentages shift from green to red as the allowance decreases. Refreshes every minute.

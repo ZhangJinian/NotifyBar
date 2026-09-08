@@ -8,6 +8,20 @@
 
 原生 Swift / AppKit 实现，无第三方运行时依赖。
 
+## 界面截图
+
+### Touch Bar 实拍
+
+![MacBook 上的 Touch Bar](docs/images/touchbar-photo.png)
+
+早期版本的硬件实拍；当前版本已根据剩余额度为百分比着色。
+
+### 当前 Codex 小块
+
+<img src="docs/images/touchbar-preview.png" width="396" alt="带蓝色工作状态边框的 Codex 额度小块">
+
+由 NotifyBar 自身渲染，使用示例额度和重置时间，以 2 倍大小展示。蓝色边框表示任务正在进行。
+
 ## 功能
 
 - **Codex 额度**：显示 5 小时、7 天剩余额度及本地重置时间；百分比由绿到红表示额度充裕程度，每分钟刷新。
