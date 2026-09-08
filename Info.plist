@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>mytouchbar</string>
+<key>CFBundleExecutable</key><string>NotifyBar</string>
 <key>CFBundleIdentifier</key><string>local.mytouchbar</string>
-<key>CFBundleName</key><string>mytouchbar</string>
+<key>CFBundleName</key><string>NotifyBar</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>

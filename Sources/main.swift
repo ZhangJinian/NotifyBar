@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let icon = Bundle.main.url(forResource: "terminal", withExtension: "png").flatMap(NSImage.init(contentsOf:))
         icon?.size = NSSize(width: 18, height: 18)
         statusItem.button?.image = icon
-        statusItem.button?.setAccessibilityLabel("mytouchbar Codex 额度")
+        statusItem.button?.setAccessibilityLabel("NotifyBar")
         let notifications = UNUserNotificationCenter.current()
         notifications.delegate = self
         notifications.requestAuthorization(options: [.alert, .sound]) { _, _ in }
