@@ -1,72 +1,79 @@
+<p align="center"><img src="Resources/terminal.png" width="128" alt="NotifyBar logo"></p>
+
 # NotifyBar
 
-独立的 Codex Touch Bar 小块，198 × 30 点。左侧新版 ChatGPT 图标，右侧两行：
+English | [简体中文](README-cn.md)
 
-```text
-     5h  88%   09/07 18:30
-图标 7d  67%   09/12 10:00
+A lightweight macOS menu bar and Touch Bar utility for monitoring Codex quotas, tracking Codex and OpenCode tasks, and receiving clickable task notifications.
+
+Built with Swift and AppKit, with no third-party runtime dependencies.
+
+## Features
+
+- **Codex quotas:** remaining 5-hour and 7-day allowances with local reset times. Percentages shift from green to red as the allowance decreases. Refreshes every minute.
+- **Background Touch Bar:** compact 198 × 30 point blocks that remain visible when switching apps. The OpenCode block appears automatically while OpenCode is running.
+- **Task menu:** detected conversations grouped by Codex and OpenCode, with status and clickable navigation.
+- **Multiple instances:** OpenCode indicators grouped by Terminal and VS Code, with one light per instance. Tap the block to cycle through instances.
+- **Notifications:** include the source, conversation name, and event: completed, awaiting authorization, awaiting an answer, or terminated. Click to open the corresponding interface.
+
+| State | Codex border | OpenCode indicator |
+| --- | --- | --- |
+| Idle | None | Green |
+| Working | Pulsing blue | Pulsing blue |
+| Awaiting authorization or an answer | Orange | Orange |
+| Completed, unread | Red | Red |
+
+## Build and install
+
+Requires macOS 12 or later. Touch Bar features require a Mac with a Touch Bar; the menu bar and notifications can be used independently.
+
+Install Xcode Command Line Tools if needed:
+
+```sh
+xcode-select --install
 ```
 
-百分比表示剩余量，时间为本机时区的 `MM/dd HH:mm` 重置时间。每 60 秒刷新，点击小块会打开当前任务；额度仍可从菜单栏手动刷新。缺失窗口或数值显示 `--`；请求失败保留旧数据，文字变橙色，菜单栏图标提示具体原因，下次自动重试。
-
-## 运行
-
-需要 macOS 12+、Xcode Command Line Tools，以及已经登录的 ChatGPT/Codex 本机应用。
+From the project directory:
 
 ```sh
 ./build.sh
 open build/NotifyBar.app
 ```
 
-菜单栏只放一个图标，提供刷新、重新显示、隐藏和退出。程序独立常驻，不要求 Codex 在前台，也不跟随 Codex 退出。不安装启动代理；需要登录自动启动时，可自行将 app 添加到系统登录项。
+Drag `build/NotifyBar.app` into Applications to install it. Use the terminal icon in the menu bar to access controls. To launch at login, add the app to macOS Login Items.
 
-## 左侧布局与后台显示
+Codex quota monitoring requires an installed, signed-in Codex / ChatGPT desktop app. The current integration looks for the bundled Codex executable under `/Applications/ChatGPT.app`. OpenCode must be installed and running locally.
 
-小块放在 Touch Bar 左侧应用区域，固定 198 × 30 点；右侧系统 Control Strip 不再注册额度项。保持两行额度和重置时间，没有语音或电量条。
+## Permissions and notifications
 
-原 CodexBar 用 `presentSystemModalTouchBar:systemTrayItemIdentifier:` 绕过前台应用 responder chain，所以切换应用后仍可见。本版本复用这个后台展示方式，但把 650 点的大视图改为 198 点小块，通过 `[额度项, OpenCode项, flexibleSpace]` 左对齐。
+Allow notifications when prompted. For persistent on-screen notifications, choose the Alerts style in macOS notification settings. Delivery also depends on notification permissions and Focus settings.
 
-OpenCode 进程存在时自动加入另一个 198 × 30 点小块，退出后自动移除。第一行显示 `OpenCode`，第二行横向显示所有已打开位置，例如 `● ● Terminal  ● VS Code`；同一位置的每个 OpenCode 实例各有一个灯。蓝色呼吸表示工作中，绿色表示空闲且已查看，橙黄色表示等待批准，红色表示任务完成但未查看；点击对应实例后红灯转绿，并按实例顺序轮流激活。Terminal 通过 TTY 定位具体标签页；VS Code 通过工作目录定位窗口并聚焦集成终端，首次使用可能出现 macOS 自动化权限提示。
+Navigating to Terminal or VS Code may require Automation permission. Focusing the VS Code integrated terminal uses keyboard automation and may require Accessibility permission. The app does not use the microphone or provide voice controls.
 
-macOS 系统模态接口仍管理整个左侧应用区域。空余位置可添加 **NotifyBar 自己的其他块**，不能自动混入前台其他应用的按钮。右侧系统控制区由系统管理。私有接口未来可能变化；实际物理位置以设备显示为准。
+## How it works and current limitations
 
-更新后退出旧 NotifyBar，再启动新版本。旧 CodexBar 若仍显示，可从其菜单隐藏 Touch Bar，随后在 NotifyBar 菜单点“重新显示小块”。
+- Codex quotas come from the local `codex app-server` endpoint `account/rateLimits/read`. No API key needs to be entered.
+- Codex task state comes from local IPC and unread records; titles come from the local session index. VS Code routing uses project assignments saved by its extension.
+- OpenCode monitoring reads local processes, its SQLite database, and logs. Terminal navigation uses TTY identifiers; VS Code navigation uses the working directory and focuses the integrated terminal.
+- The app reads local titles, state, and application storage for display. It does not initiate model requests or upload that data.
+- Background Touch Bar presentation uses private macOS interfaces. OS or upstream application updates may require changes. NotifyBar manages the left application area; unused space can host additional NotifyBar blocks, but not buttons from other apps.
+- OpenCode process-to-session mapping and approval-log interpretation are heuristic. Multiple instances in the same directory, resumed sessions, and parallel subtasks may be misidentified. Exact tab selection among multiple VS Code terminals in one window is not guaranteed.
+- Termination is reported only when an explicit interruption marker is recognized. Without that marker, cancellation cannot reliably be distinguished from other ways a task ends.
+- The menu lists connected, discoverable conversations, not the complete conversation history. Reopen the menu to refresh its displayed state.
+- Builds target the local machine architecture and use ad hoc signing. They are not signed with an Apple Developer certificate or notarized.
 
-额度客户端精简复用 CodexBar：启动已安装应用内的 `codex app-server --listen stdio://`，完成 initialize/initialized，再请求 `account/rateLimits/read`。优先使用 `rateLimitsByLimitId.codex`，按 300/10080 分钟识别两个窗口；只有旧接口同时缺失两个窗口时长时才使用 primary/secondary 顺序。带超时、重连和后台刷新；不读取或保存凭据，不使用 API key，不创建会话或发送模型请求。
-
-没有语音、麦克风、辅助功能权限请求，也没有桌面浮窗、token 扫描、自动启动脚本或第三方依赖。5 个 Swift 源文件，原生 AppKit + Foundation。
-
-## 检查
+## Checks
 
 ```sh
 ./build.sh
 build/NotifyBar.app/Contents/MacOS/NotifyBar --self-test
 build/NotifyBar.app/Contents/MacOS/NotifyBar --probe
-build/NotifyBar.app/Contents/MacOS/NotifyBar --preview /tmp/NotifyBar-preview.png
-```
-
-`--self-test` 验证窗口缺失/顺序、旧格式、未知时长、百分比边界与时间戳单位；`--probe` 只输出额度及重置时间，验证真实 app-server 读取；`--preview` 生成示例数据的原尺寸布局图，不表示真实额度。
-
-派生自 CodexBar，保留其 MIT LICENSE 中 Jack Chen 与 wjx8 的版权声明。
-
-## 任务与未读边框
-
-- 有运行中任务：蓝色细边框，约 3.2 秒一个呼吸周期。系统开启“减少动态效果”时常亮。
-- 等待授权或用户输入：橙黄色常亮，优先级高于蓝框。
-- 任务完成但未读：红色常亮；查看后恢复无框。
-- 空闲且已查看：无框。点击小块打开对应 Codex 任务。
-
-点击时优先打开最近更新的未读任务，其次是最近更新的运行中任务。VS Code 插件记录过的任务通过 `vscode://codex/local/<id>` 打开；其他任务通过 `codex://threads/<id>` 在 Codex 桌面应用打开。点击不会把消息标为已读，是否已读仍由对应应用决定。
-
-使用安装版 ChatGPT 自带的 `icon-chatgpt.png`；两行保留时间，但去掉末尾“重置”两字。宽度为 198 点，左右留白接近，左侧位置不变。
-
-`TaskActivity.swift` 以只读 follower 连接本机 `.codex/ipc/ipc.sock`，订阅已知任务的 `thread-stream-state-changed` 快照和增量，仅保留 `threadRuntimeStatus`，不保存对话内容。读取 `.codex-global-state.json` 的 `electron-persisted-atom-state.unread-thread-ids-by-host-v1` 判断未读，每两秒同步。读取范围是桌面应用已知的 Codex 任务，包括应用连接并广播的远端任务，不是未连接机器上的所有任务或普通 ChatGPT 网页聊天。不会发起任务、写入已读标记或请求辅助功能权限。
-
-断线自动重连并清除失效运行状态；增量版本不连续时重新读取快照。此集成基于当前安装版的本机内部格式（状态广播 v11），应用未来改变格式时需适配。启动时订阅已知任务，状态快照处理后即丢弃消息正文。
-
-```sh
 build/NotifyBar.app/Contents/MacOS/NotifyBar --activity-probe
 build/NotifyBar.app/Contents/MacOS/NotifyBar --opencode-probe
-build/NotifyBar.app/Contents/MacOS/NotifyBar --preview /tmp/NotifyBar-unread.png --unread
-build/NotifyBar.app/Contents/MacOS/NotifyBar --preview /tmp/NotifyBar-running.png --running
 ```
+
+Self-checks cover quota parsing, colors, task state, and routing classification. Live probes require the corresponding local app to be running. Passing self-checks does not establish compatibility with every terminal setup or upstream version.
+
+## License and acknowledgements
+
+Derived from CodexBar and extended for task monitoring. The copyright notices for Jack Chen and wjx8 are preserved. Licensed under the [MIT License](LICENSE).
