@@ -10,17 +10,17 @@ Built with Swift and AppKit, with no third-party runtime dependencies.
 
 ## Screenshots
 
-### Touch Bar on hardware
+### Touch Bar
 
-![Touch Bar on a MacBook](docs/images/touchbar-photo.png)
+![Live Touch Bar with Codex quotas and OpenCode instances](docs/images/touchbar.png)
 
-Early-version hardware photo. The current version colors quota percentages according to the remaining allowance.
+Actual Touch Bar capture showing Codex quotas and three OpenCode instances across VS Code and Terminal.
 
-### Current Codex block
+### Menu bar
 
-<img src="docs/images/touchbar-preview.png" width="396" alt="Codex quota block with a blue working-state border">
+<img src="docs/images/menubar.png" width="600" alt="NotifyBar menu with quota information and OpenCode conversations">
 
-Rendered by NotifyBar itself using sample quotas and reset times; shown at 2× size. Blue indicates a running task.
+Actual menu capture with conversation status and quick actions.
 
 ## Features
 

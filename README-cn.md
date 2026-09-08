@@ -10,17 +10,17 @@
 
 ## 界面截图
 
-### Touch Bar 实拍
+### Touch Bar
 
-![MacBook 上的 Touch Bar](docs/images/touchbar-photo.png)
+![真实 Touch Bar：Codex 额度与 OpenCode 实例](docs/images/touchbar.png)
 
-早期版本的硬件实拍；当前版本已根据剩余额度为百分比着色。
+真实 Touch Bar 截图，展示 Codex 额度及分布在 VS Code、Terminal 中的三个 OpenCode 实例。
 
-### 当前 Codex 小块
+### 菜单栏
 
-<img src="docs/images/touchbar-preview.png" width="396" alt="带蓝色工作状态边框的 Codex 额度小块">
+<img src="docs/images/menubar.png" width="600" alt="NotifyBar 菜单：额度、OpenCode 对话状态及快捷操作">
 
-由 NotifyBar 自身渲染，使用示例额度和重置时间，以 2 倍大小展示。蓝色边框表示任务正在进行。
+真实菜单截图，展示对话状态与快捷操作。
 
 ## 功能
 
