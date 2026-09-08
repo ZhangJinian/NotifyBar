@@ -24,6 +24,12 @@ private struct OpenCodeProcess {
     let startedAt: Int64
 }
 
+private func waitingForOpenCodeInput(session: String, log: String) -> Bool {
+    let lines = log.split(separator: "\n")
+    guard let loop = lines.lastIndex(where: { $0.contains("message=loop session.id=\(session)") }) else { return false }
+    return lines[lines.index(after: loop)...].contains { $0.contains("message=asking id=per_") || $0.contains("message=asking id=que_") }
+}
+
 final class OpenCodeView: NSButton {
     static let blockSize = NSSize(width: 198, height: 30)
     var displayState = OpenCodeState() { didSet { needsDisplay = true; updateLight() } }
@@ -232,7 +238,11 @@ final class OpenCodeMonitor {
         let escaped = cwd.replacingOccurrences(of: "'", with: "''")
         let upper = before.map { " AND s.time_created < \($0)" } ?? ""
         let query = "SELECT EXISTS(SELECT 1 FROM part p JOIN session s ON s.id=p.session_id WHERE s.directory='\(escaped)' AND s.time_created >= \(after)\(upper) AND json_extract(p.data,'$.type')='tool' AND (json_extract(p.data,'$.state.status')='pending' OR (json_extract(p.data,'$.tool')='question' AND json_extract(p.data,'$.state.status')='running')));"
-        return output("/usr/bin/sqlite3", [path, query]) == "1"
+        if output("/usr/bin/sqlite3", [path, query]) == "1" { return true }
+        let session = sql(cwd, after: after, before: before, expression: "s.id")
+        let log = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode/log/opencode.log").path
+        guard !session.isEmpty, let text = output("/usr/bin/tail", ["-n", "500", log]) else { return false }
+        return waitingForOpenCodeInput(session: session, log: text)
     }
     private func publish(_ next: OpenCodeState) {
         guard next != state else { return }; state = next; onChange?(next)
@@ -242,5 +252,7 @@ final class OpenCodeMonitor {
 func openCodeSelfTest() {
     let state = OpenCodeState(locations: [.init(location: "VS Code", activity: .running, hostPID: 1), .init()])
     precondition(state.visible && state.locations.map(\.location) == ["VS Code", "Terminal"])
+    precondition(waitingForOpenCodeInput(session: "s1", log: "message=loop session.id=s1\nmessage=asking id=per_1"))
+    precondition(!waitingForOpenCodeInput(session: "s1", log: "message=loop session.id=s1\nmessage=asking id=per_1\nmessage=loop session.id=s1"))
     print("PASS: OpenCode horizontal locations")
 }
