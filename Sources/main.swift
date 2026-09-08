@@ -68,8 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(info); menu.addItem(.separator())
         addSection("Codex", entries: codexTasks.map { ($0.title, $0.activity) }, action: #selector(openCodex(_:)), to: menu)
+        menu.insertItem(info, at: 1)
         addSection("OpenCode", entries: openCodeTasks.map { ("\($0.title) · \($0.location)", $0.activity) }, action: #selector(openOpenCode(_:)), to: menu)
         for item in menu.items {
             if item.action == #selector(openCodex(_:)), codexTasks.indices.contains(item.tag) { item.representedObject = codexTasks[item.tag] }
