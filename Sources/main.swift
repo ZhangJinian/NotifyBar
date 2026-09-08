@@ -1,6 +1,12 @@
 import AppKit
+import UserNotifications
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+private func completed<Key: Hashable>(_ activity: TaskActivity, key: Key, active: inout Set<Key>) -> Bool {
+    if activity == .running || activity == .attention { active.insert(key) }
+    return activity == .unread && active.remove(key) != nil
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
     private let activityMonitor = TaskActivityMonitor()
     private let client = CodexAppServerClient()
     private let strip = CompactTouchBar()
@@ -15,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let info = NSMenuItem(title: "正在读取额度…", action: nil, keyEquivalent: "")
     private var codexTasks: [CodexMenuEntry] = []
     private var openCodeTasks: [OpenCodeLocation] = []
+    private var activeCodexTasks = Set<String>()
+    private var activeOpenCodeTasks = Set<pid_t>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -23,6 +31,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         icon?.size = NSSize(width: 18, height: 18)
         statusItem.button?.image = icon
         statusItem.button?.setAccessibilityLabel("mytouchbar Codex 额度")
+        let notifications = UNUserNotificationCenter.current()
+        notifications.delegate = self
+        notifications.requestAuthorization(options: [.alert, .sound]) { _, _ in }
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -31,13 +42,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         strip.openCodeItem.view = openCode
         openCode.onTap = { [weak self] in self?.openCodeMonitor.activate() }
         openCodeMonitor.onChange = { [weak self] state in
+            self?.notifyCompletedOpenCodeTasks(state.locations)
             self?.openCode.displayState = state
             self?.strip.setOpenCodeVisible(state.visible)
             self?.openCodeTasks = state.locations
         }
         openCodeMonitor.start()
         activityMonitor.onChange = { [weak self] in self?.quota.activity = $0 }
-        activityMonitor.onTasksChange = { [weak self] in self?.codexTasks = $0 }
+        activityMonitor.onTasksChange = { [weak self] tasks in self?.notifyCompletedCodexTasks(tasks); self?.codexTasks = tasks }
         activityMonitor.start()
         client.onRateLimitsUpdated = { [weak self] in self?.refresh() }
         show()
@@ -97,6 +109,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard openCodeTasks.indices.contains(sender.tag) else { return }; openCodeMonitor.activate(processPID: openCodeTasks[sender.tag].processPID)
     }
 
+    private func notifyCompletedCodexTasks(_ tasks: [CodexMenuEntry]) {
+        for task in tasks {
+            let key = "\(task.host):\(task.id)"
+            if completed(task.activity, key: key, active: &activeCodexTasks) {
+                notify(title: "Codex 任务已完成", body: task.title, id: "codex:\(key)", userInfo: ["source": "codex", "id": task.id, "host": task.host])
+            }
+        }
+    }
+
+    private func notifyCompletedOpenCodeTasks(_ tasks: [OpenCodeLocation]) {
+        for task in tasks {
+            if completed(task.activity, key: task.processPID, active: &activeOpenCodeTasks) {
+                notify(title: "OpenCode 任务已完成", body: "\(task.title) · \(task.location)", id: "opencode:\(task.processPID)", userInfo: ["source": "opencode", "pid": Int(task.processPID)])
+            }
+        }
+    }
+
+    private func notify(title: String, body: String, id: String, userInfo: [AnyHashable: Any]) {
+        let content = UNMutableNotificationContent()
+        content.title = title; content.body = body; content.sound = .default; content.userInfo = userInfo
+        UNUserNotificationCenter.current().add(.init(identifier: id, content: content, trigger: nil))
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        DispatchQueue.main.async { [weak self] in
+            if info["source"] as? String == "codex", let id = info["id"] as? String, let host = info["host"] as? String {
+                TaskLauncher.open(.init(id: id, host: host))
+            } else if info["source"] as? String == "opencode", let pid = info["pid"] as? Int {
+                self?.openCodeMonitor.activate(processPID: pid_t(pid))
+            }
+            completionHandler()
+        }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
+    }
+
     @objc private func refresh() {
         guard !refreshing else { return }
         refreshing = true
@@ -142,6 +195,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 if CommandLine.arguments.contains("--self-test") {
+    var notificationTasks = Set<String>()
+    precondition(!completed(.unread, key: "old", active: &notificationTasks))
+    precondition(!completed(.running, key: "new", active: &notificationTasks))
+    precondition(completed(.unread, key: "new", active: &notificationTasks))
     try selfTest()
     activitySelfTest()
     quotaColorSelfTest()
