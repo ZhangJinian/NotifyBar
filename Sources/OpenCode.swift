@@ -148,8 +148,9 @@ final class OpenCodeMonitor {
         let process = Process(), pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: launchPath); process.arguments = arguments; process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return nil }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func poll() {
@@ -235,11 +236,10 @@ final class OpenCodeMonitor {
     }
     private func latestNeedsAttention(in cwd: String, after: Int64, before: Int64?) -> Bool {
         let path = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode/opencode.db").path
-        let escaped = cwd.replacingOccurrences(of: "'", with: "''")
-        let upper = before.map { " AND s.time_created < \($0)" } ?? ""
-        let query = "SELECT EXISTS(SELECT 1 FROM part p JOIN session s ON s.id=p.session_id WHERE s.directory='\(escaped)' AND s.time_created >= \(after)\(upper) AND json_extract(p.data,'$.type')='tool' AND (json_extract(p.data,'$.state.status')='pending' OR (json_extract(p.data,'$.tool')='question' AND json_extract(p.data,'$.state.status')='running')));"
-        if output("/usr/bin/sqlite3", [path, query]) == "1" { return true }
         let session = sql(cwd, after: after, before: before, expression: "s.id")
+        let escaped = session.replacingOccurrences(of: "'", with: "''")
+        let query = "SELECT CASE WHEN json_extract(data,'$.state.status')='pending' OR (json_extract(data,'$.tool')='question' AND json_extract(data,'$.state.status')='running') THEN '1' ELSE '0' END FROM part WHERE session_id='\(escaped)' AND json_extract(data,'$.type')='tool' ORDER BY time_created DESC LIMIT 1;"
+        if output("/usr/bin/sqlite3", [path, query]) == "1" { return true }
         let log = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/opencode/log/opencode.log").path
         guard !session.isEmpty, let text = output("/usr/bin/tail", ["-n", "500", log]) else { return false }
         return waitingForOpenCodeInput(session: session, log: text)

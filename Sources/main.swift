@@ -216,7 +216,7 @@ if CommandLine.arguments.contains("--self-test") {
     let monitor = OpenCodeMonitor()
     monitor.onChange = { print("OpenCode: visible=\($0.visible) locations=\($0.locations.map { "\($0.location):\($0.activity.rawValue)" }.joined(separator: ","))") }
     monitor.start()
-    RunLoop.current.run(until: Date().addingTimeInterval(3))
+    RunLoop.current.run(until: Date().addingTimeInterval(10))
     monitor.stop()
 } else if CommandLine.arguments.contains("--probe") {
     let client = CodexAppServerClient()
