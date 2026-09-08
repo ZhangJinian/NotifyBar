@@ -71,6 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         menu.addItem(info); menu.addItem(.separator())
         addSection("Codex", entries: codexTasks.map { ($0.title, $0.activity) }, action: #selector(openCodex(_:)), to: menu)
         addSection("OpenCode", entries: openCodeTasks.map { ("\($0.title) · \($0.location)", $0.activity) }, action: #selector(openOpenCode(_:)), to: menu)
+        for item in menu.items {
+            if item.action == #selector(openCodex(_:)), codexTasks.indices.contains(item.tag) { item.representedObject = codexTasks[item.tag] }
+            if item.action == #selector(openOpenCode(_:)), openCodeTasks.indices.contains(item.tag) { item.representedObject = openCodeTasks[item.tag].processPID }
+        }
         menu.addItem(.separator())
         for (title, action) in [("刷新额度", #selector(refresh)), ("重新显示小块", #selector(show)), ("隐藏小块", #selector(hide)), ("退出", #selector(quit))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item)
@@ -103,10 +107,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         return image
     }
     @objc private func openCodex(_ sender: NSMenuItem) {
-        guard codexTasks.indices.contains(sender.tag) else { return }; activityMonitor.open(codexTasks[sender.tag])
+        guard let task = sender.representedObject as? CodexMenuEntry else { return }; activityMonitor.open(task)
     }
     @objc private func openOpenCode(_ sender: NSMenuItem) {
-        guard openCodeTasks.indices.contains(sender.tag) else { return }; openCodeMonitor.activate(processPID: openCodeTasks[sender.tag].processPID)
+        guard let pid = sender.representedObject as? pid_t else { return }; openCodeMonitor.activate(processPID: pid)
     }
 
     private func notifyCompletedCodexTasks(_ tasks: [CodexMenuEntry]) {

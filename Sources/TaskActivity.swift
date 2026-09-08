@@ -88,17 +88,22 @@ enum TaskLauncher {
     }
 
     private static func isVSCodeThread(_ id: String) -> Bool {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Code/User")
-        let needle = Data("openai-codex://route/local/\(id)".utf8)
-        let global = root.appendingPathComponent("globalStorage/state.vscdb")
-        if let data = try? Data(contentsOf: global), data.range(of: needle) != nil { return true }
-        guard let files = FileManager.default.enumerator(at: root.appendingPathComponent("workspaceStorage"),
-            includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else { return false }
-        for case let file as URL in files where file.lastPathComponent == "state.vscdb" {
-            if let data = try? Data(contentsOf: file), data.range(of: needle) != nil { return true }
-        }
-        return false
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Code/User/globalStorage/state.vscdb").path
+        let process = Process(), pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = ["-readonly", path, "SELECT value FROM ItemTable WHERE key='openai.chatgpt';"]
+        process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return false }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return hasVSCodeAssignment(id, state: state)
+    }
+
+    static func hasVSCodeAssignment(_ id: String, state: [String: Any]) -> Bool {
+        let assignments = state["thread-project-assignments"] as? [String: [String: Any]]
+        return (assignments?[id]?["projectId"] as? String)?.hasPrefix("vscode-") == true
     }
 }
 
@@ -288,6 +293,9 @@ final class TaskActivityMonitor {
 }
 
 func activitySelfTest() {
+    let routing: [String: Any] = ["thread-project-assignments": ["plugin": ["projectId": "vscode-project"]], "cache": "desktop"]
+    precondition(TaskLauncher.hasVSCodeAssignment("plugin", state: routing))
+    precondition(!TaskLauncher.hasVSCodeAssignment("desktop", state: routing))
     precondition(TaskActivity.resolve(running: true, attention: true, unread: true) == .attention)
     precondition(TaskActivity.resolve(running: true, attention: false, unread: true) == .running)
     precondition(TaskActivity.resolve(running: false, attention: false, unread: true) == .unread)
