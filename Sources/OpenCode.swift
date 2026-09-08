@@ -6,6 +6,7 @@ struct OpenCodeLocation: Equatable {
     var activity: TaskActivity = .idle
     var processPID: pid_t = 0
     var title = "OpenCode"
+    var notice = ""
     var hostPID: pid_t?
     var tty = ""
     var directory = ""
@@ -171,9 +172,12 @@ final class OpenCodeMonitor {
                 let before = index + 1 < ordered.count ? ordered[index + 1].startedAt : nil
                 let attention = latestNeedsAttention(in: process.directory, after: after, before: before)
                 let running = latestAssistantRunning(in: process.directory, after: after, before: before)
+                let error = sql(process.directory, after: after, before: before, expression: "json_extract(m.data,'$.error.name')")
+                let tool = sql(process.directory, after: after, before: before, expression: "(SELECT json_extract(p.data,'$.tool') FROM part p WHERE p.message_id=m.id AND json_extract(p.data,'$.type')='tool' ORDER BY p.time_created DESC LIMIT 1)")
+                let notice = error == "MessageAbortedError" ? "已终止" : attention ? (tool == "question" ? "等待回答" : "等待授权") : ""
                 found.append(OpenCodeLocation(location: process.host.name, activity: attention ? .attention : running ? .running : .idle,
                     processPID: process.pid, title: latestTitle(in: process.directory, after: after, before: before),
-                    hostPID: process.host.pid, tty: process.tty, directory: process.directory))
+                    notice: notice, hostPID: process.host.pid, tty: process.tty, directory: process.directory))
             }
         }
         let next = found.sorted {

@@ -15,12 +15,14 @@ struct TaskStatus {
     var owner: String
     var id: String
     var host: String
+    var notice = ""
     var updatedAt: Double
 
     mutating func apply(_ change: [String: Any]) -> Bool {
         guard let next = change["revision"] as? Int else { return false }
         if change["type"] as? String == "snapshot", let state = change["conversationState"] as? [String: Any] {
             let runtime = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String ?? ""
+            notice = Self.notice(runtime)
             running = runtime == "active"
             attention = Self.runtimeNeedsAttention(runtime)
             updatedAt = (state["updatedAt"] as? NSNumber)?.doubleValue ?? updatedAt
@@ -30,21 +32,32 @@ struct TaskStatus {
                 let path = patch["path"] as? [Any] ?? []
                 if path.isEmpty, let state = patch["value"] as? [String: Any] {
                     let runtime = (state["threadRuntimeStatus"] as? [String: Any])?["type"] as? String ?? ""
-                    running = runtime == "active"; attention = Self.runtimeNeedsAttention(runtime)
+                    notice = Self.notice(runtime)
+            running = runtime == "active"; attention = Self.runtimeNeedsAttention(runtime)
                 } else if path.first as? String == "threadRuntimeStatus" {
                     if path.count == 1 {
                         let runtime = (patch["value"] as? [String: Any])?["type"] as? String ?? ""
-                        running = runtime == "active"; attention = Self.runtimeNeedsAttention(runtime)
+                        notice = Self.notice(runtime)
+            running = runtime == "active"; attention = Self.runtimeNeedsAttention(runtime)
                     }
                     else if path.count == 2, path[1] as? String == "type" { running = patch["value"] as? String == "active" }
                 }
                 if path.first as? String == "threadRuntimeStatus", let value = patch["value"] as? String {
                     attention = Self.runtimeNeedsAttention(value)
+                    notice = Self.notice(value)
                 }
             }
         } else { return false }
         revision = next
         return true
+    }
+
+    static func notice(_ runtime: String) -> String {
+        let value = runtime.lowercased()
+        if value.contains("cancel") || value.contains("interrupt") || value.contains("abort") { return "已终止" }
+        if value.contains("approval") || value.contains("permission") { return "等待授权" }
+        if value.contains("input") || value.contains("question") || value.contains("waiting") { return "等待回答" }
+        return ""
     }
 
     private static func runtimeNeedsAttention(_ value: String) -> Bool {
@@ -63,6 +76,7 @@ struct CodexMenuEntry: Equatable {
     let host: String
     let title: String
     let activity: TaskActivity
+    var notice = ""
 }
 
 enum TaskLauncher {
@@ -272,7 +286,7 @@ final class TaskActivityMonitor {
         let titles = codexTitles()
         let entries = statuses.values.sorted { $0.updatedAt > $1.updatedAt }.map { status in
             CodexMenuEntry(id: status.id, host: status.host, title: titles[status.id] ?? status.id,
-                activity: status.attention ? .attention : status.running ? .running : unreadKeys.contains("\(status.host):\(status.id)") ? .unread : .idle)
+                activity: status.attention ? .attention : status.running ? .running : unreadKeys.contains("\(status.host):\(status.id)") ? .unread : .idle, notice: status.notice)
         }
         let changed = value != current
         current = value
@@ -293,6 +307,10 @@ final class TaskActivityMonitor {
 }
 
 func activitySelfTest() {
+    precondition(TaskStatus.notice("waitingForApproval") == "等待授权")
+    precondition(TaskStatus.notice("waitingForInput") == "等待回答")
+    precondition(TaskStatus.notice("interrupted") == "已终止")
+    precondition(TaskStatus.notice("idle").isEmpty)
     let routing: [String: Any] = ["thread-project-assignments": ["plugin": ["projectId": "vscode-project"]], "cache": "desktop"]
     precondition(TaskLauncher.hasVSCodeAssignment("plugin", state: routing))
     precondition(!TaskLauncher.hasVSCodeAssignment("desktop", state: routing))

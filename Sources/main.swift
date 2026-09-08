@@ -116,16 +116,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private func notifyCompletedCodexTasks(_ tasks: [CodexMenuEntry]) {
         for task in tasks {
             let key = "\(task.host):\(task.id)"
-            if completed(task.activity, key: key, active: &activeCodexTasks) {
-                notify(title: "Codex 任务已完成", body: task.title, id: "codex:\(key)", userInfo: ["source": "codex", "id": task.id, "host": task.host])
+            let done = completed(task.activity, key: key, active: &activeCodexTasks)
+            let previous = codexTasks.first { $0.id == task.id && $0.host == task.host }
+            let event = task.notice.isEmpty ? (done ? "已完成" : "") : task.notice
+            if !event.isEmpty && (done || previous?.notice != task.notice && (previous != nil || task.activity == .attention)) {
+                notify(title: "Codex · \(TaskLauncher.preferredURL(for: .init(id: task.id, host: task.host))?.scheme == "vscode" ? "VS Code" : "Codex 应用") · \(event)", body: task.title, id: "codex:\(key)", userInfo: ["source": "codex", "id": task.id, "host": task.host])
             }
         }
     }
 
     private func notifyCompletedOpenCodeTasks(_ tasks: [OpenCodeLocation]) {
         for task in tasks {
-            if completed(task.activity, key: task.processPID, active: &activeOpenCodeTasks) {
-                notify(title: "OpenCode 任务已完成", body: "\(task.title) · \(task.location)", id: "opencode:\(task.processPID)", userInfo: ["source": "opencode", "pid": Int(task.processPID)])
+            let done = completed(task.activity, key: task.processPID, active: &activeOpenCodeTasks)
+            let previous = openCodeTasks.first { $0.processPID == task.processPID }
+            let event = task.notice.isEmpty ? (done ? "已完成" : "") : task.notice
+            if !event.isEmpty && (done || previous?.notice != task.notice && (previous != nil || task.activity == .attention)) {
+                notify(title: "OpenCode · \(task.location) · \(event)", body: "\(task.title) · \(task.location)", id: "opencode:\(task.processPID)", userInfo: ["source": "opencode", "pid": Int(task.processPID)])
             }
         }
     }
