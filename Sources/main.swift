@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        let icon = QuotaView.icon?.copy() as? NSImage
+        let icon = Bundle.main.url(forResource: "terminal", withExtension: "png").flatMap(NSImage.init(contentsOf:))
         icon?.size = NSSize(width: 18, height: 18)
         statusItem.button?.image = icon
         statusItem.button?.setAccessibilityLabel("mytouchbar Codex 额度")

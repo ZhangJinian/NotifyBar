@@ -9,5 +9,6 @@ xcrun swiftc -O -target "$(uname -m)-apple-macosx12.0" -sdk "$(xcrun --sdk macos
 cp Info.plist "$APP/Contents/Info.plist"
 mkdir -p "$APP/Contents/Resources"
 cp Resources/opencode.svg "$APP/Contents/Resources/opencode.svg"
+cp Resources/terminal.png Resources/AppIcon.icns "$APP/Contents/Resources/"
 codesign --force --sign - "$APP"
 echo "$PWD/$APP"
