@@ -24,6 +24,7 @@ final class CodexAppServerClient {
     typealias JSONDictionary = [String: Any]
 
     private let codexCandidates = [
+        "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
         "/Applications/ChatGPT.app/Contents/Resources/codex",
         "/Applications/Codex.app/Contents/Resources/codex",
         "/Applications/GPT.app/Contents/Resources/codex"
