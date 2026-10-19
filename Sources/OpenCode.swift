@@ -1,5 +1,6 @@
 import AppKit
 import QuartzCore
+import Darwin
 
 struct OpenCodeLocation: Equatable {
     var location = "Terminal"
@@ -10,6 +11,7 @@ struct OpenCodeLocation: Equatable {
     var hostPID: pid_t?
     var tty = ""
     var directory = ""
+    var cmuxEnvironment: [String: String] = [:]
 }
 
 struct OpenCodeState: Equatable {
@@ -23,6 +25,30 @@ private struct OpenCodeProcess {
     let host: (name: String, pid: pid_t?)
     let tty: String
     let startedAt: Int64
+    let cmuxEnvironment: [String: String]
+}
+
+private func cmuxEnvironment(from data: Data) -> [String: String] {
+    guard data.count >= MemoryLayout<Int32>.size else { return [:] }
+    let argc = data.prefix(4).withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
+    guard argc > 0 else { return [:] }
+    let bytes = Array(data)
+    var cursor = 4
+    while cursor < bytes.count && bytes[cursor] != 0 { cursor += 1 }
+    while cursor < bytes.count && bytes[cursor] == 0 { cursor += 1 }
+    for _ in 0..<argc {
+        while cursor < bytes.count && bytes[cursor] != 0 { cursor += 1 }
+        guard cursor < bytes.count else { return [:] }
+        cursor += 1
+    }
+    var result: [String: String] = [:]
+    for entry in bytes[cursor...].split(separator: 0) {
+        let pair = String(decoding: entry, as: UTF8.self).split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+        if pair.count == 2 && ["CMUX_WORKSPACE_ID", "CMUX_SURFACE_ID", "CMUX_SOCKET_PATH"].contains(String(pair[0])) {
+            result[String(pair[0])] = String(pair[1])
+        }
+    }
+    return result
 }
 
 private func waitingForOpenCodeInput(session: String, log: String) -> Bool {
@@ -39,8 +65,9 @@ final class OpenCodeView: NSButton {
     private static let icon = Bundle.main.url(forResource: "opencode", withExtension: "svg").flatMap(NSImage.init(contentsOf:))
     private var groups: [(String, [OpenCodeLocation])] {
         let grouped = Dictionary(grouping: displayState.locations, by: \.location)
-        return grouped.keys.sorted { $0 == "VS Code" && $1 != "VS Code" }.map { ($0, grouped[$0]!) }
+        return grouped.keys.sorted { $0 == "VS Code" ? $1 != "VS Code" : $1 != "VS Code" && $0 < $1 }.map { ($0, grouped[$0]!) }
     }
+    private var labelFont: NSFont { NSFont.systemFont(ofSize: groups.count > 2 ? 10 : 11, weight: .medium) }
 
     init() {
         super.init(frame: NSRect(origin: .zero, size: Self.blockSize))
@@ -58,7 +85,7 @@ final class OpenCodeView: NSButton {
     private func updateLight() {
         lights.forEach { $0.removeFromSuperlayer() }
         lights = []
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium)]
+        let attributes: [NSAttributedString.Key: Any] = [.font: labelFont]
         var x: CGFloat = 43
         for (name, locations) in groups {
             for location in locations {
@@ -83,7 +110,7 @@ final class OpenCodeView: NSButton {
         NSColor(calibratedWhite: 0.12, alpha: 1).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
         Self.icon?.draw(in: NSRect(x: 12, y: 4, width: 22, height: 22))
-        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .medium), .foregroundColor: NSColor.white]
+        let attributes: [NSAttributedString.Key: Any] = [.font: labelFont, .foregroundColor: NSColor.white]
         ("OpenCode" as NSString).draw(in: NSRect(x: 43, y: 1, width: 143, height: 14), withAttributes: attributes)
         var x: CGFloat = 43
         for (name, locations) in groups {
@@ -126,7 +153,17 @@ final class OpenCodeMonitor {
             if let url = route.url { NSWorkspace.shared.open(url) }
         }
         activationQueue.async { [weak self] in
-            if location.location == "VS Code", !location.directory.isEmpty {
+            if location.location == "cmux" {
+                let environment = location.cmuxEnvironment
+                if let workspace = environment["CMUX_WORKSPACE_ID"], UUID(uuidString: workspace) != nil,
+                   let surface = environment["CMUX_SURFACE_ID"], UUID(uuidString: surface) != nil {
+                    let cli = "/Applications/cmux.app/Contents/Resources/bin/cmux"
+                    let socket = environment["CMUX_SOCKET_PATH"].map { ["--socket", $0] } ?? []
+                    _ = self?.output(cli, socket + ["select-workspace", "--workspace", workspace])
+                    _ = self?.output(cli, socket + ["focus-panel", "--workspace", workspace, "--panel", surface])
+                }
+                if let pid = location.hostPID, let app = NSRunningApplication(processIdentifier: pid) { app.activate(options: []) }
+            } else if location.location == "VS Code", !location.directory.isEmpty {
                 let script = "delay 0.12\ntell application \"Visual Studio Code\" to activate\ntell application \"System Events\" to keystroke \"`\" using control down"
                 _ = self?.output("/usr/bin/osascript", ["-e", script])
             } else if location.location == "Terminal", !location.tty.isEmpty {
@@ -161,7 +198,7 @@ final class OpenCodeMonitor {
         let processes = raw.split(separator: "\n").compactMap { pid_t($0) }.map { pid -> OpenCodeProcess in
             let cwd = output("/usr/sbin/lsof", ["-a", "-p", "\(pid)", "-d", "cwd", "-Fn"])?.split(separator: "\n").first(where: { $0.hasPrefix("n/") }).map { String($0.dropFirst()) } ?? ""
             return OpenCodeProcess(pid: pid, directory: cwd, host: hostApp(startingAt: pid),
-                tty: output("/bin/ps", ["-p", "\(pid)", "-o", "tty="]) ?? "", startedAt: processStartedAt(pid))
+                tty: output("/bin/ps", ["-p", "\(pid)", "-o", "tty="]) ?? "", startedAt: processStartedAt(pid), cmuxEnvironment: processCMUXEnvironment(pid))
         }
         var found: [OpenCodeLocation] = []
         for group in Dictionary(grouping: processes, by: \.directory).values {
@@ -177,11 +214,11 @@ final class OpenCodeMonitor {
                 let notice = error == "MessageAbortedError" ? "已终止" : attention ? (tool == "question" ? "等待回答" : "等待授权") : ""
                 found.append(OpenCodeLocation(location: process.host.name, activity: attention ? .attention : running ? .running : .idle,
                     processPID: process.pid, title: latestTitle(in: process.directory, after: after, before: before),
-                    notice: notice, hostPID: process.host.pid, tty: process.tty, directory: process.directory))
+                    notice: notice, hostPID: process.host.pid, tty: process.tty, directory: process.directory, cmuxEnvironment: process.cmuxEnvironment))
             }
         }
         let next = found.sorted {
-            if $0.location != $1.location { return $0.location == "VS Code" }
+            if $0.location != $1.location { return $0.location == "VS Code" ? true : $1.location != "VS Code" && $0.location < $1.location }
             return $0.tty < $1.tty
         }
         DispatchQueue.main.async { [weak self] in self?.apply(next) }
@@ -213,6 +250,7 @@ final class OpenCodeMonitor {
             if let app = NSRunningApplication(processIdentifier: parent), let bundle = app.bundleIdentifier {
                 if bundle == "com.microsoft.VSCode" || bundle == "com.microsoft.VSCodeInsiders" { return ("VS Code", parent) }
                 if bundle == "com.apple.Terminal" { return ("Terminal", parent) }
+                if bundle == "com.cmuxterm.app" { return ("cmux", parent) }
             }
             current = parent
         }
@@ -223,6 +261,16 @@ final class OpenCodeMonitor {
         guard let text = output("/bin/ps", ["-p", "\(pid)", "-o", "lstart="]) else { return 0 }
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "EEE MMM d HH:mm:ss yyyy"
         return Int64((formatter.date(from: text)?.timeIntervalSince1970 ?? 0) * 1000)
+    }
+
+    private func processCMUXEnvironment(_ pid: pid_t) -> [String: String] {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [:] }
+        var data = Data(count: size)
+        let status = data.withUnsafeMutableBytes { sysctl(&mib, 3, $0.baseAddress, &size, nil, 0) }
+        guard status == 0 else { return [:] }
+        return cmuxEnvironment(from: data.prefix(size))
     }
 
     private func sql(_ cwd: String, after: Int64, before: Int64?, expression: String) -> String {
@@ -254,6 +302,10 @@ final class OpenCodeMonitor {
 }
 
 func openCodeSelfTest() {
+    var arguments = withUnsafeBytes(of: Int32(2)) { Data($0) }
+    arguments.append(Data("/bin/opencode\0\0opencode\0--port=1\0CMUX_WORKSPACE_ID=workspace\0CMUX_SURFACE_ID=surface\0CMUX_SOCKET_PATH=/tmp/a b.sock\0SECRET=hidden\0".utf8))
+    precondition(cmuxEnvironment(from: arguments) == ["CMUX_WORKSPACE_ID": "workspace", "CMUX_SURFACE_ID": "surface", "CMUX_SOCKET_PATH": "/tmp/a b.sock"])
+    precondition(cmuxEnvironment(from: Data()).isEmpty)
     let state = OpenCodeState(locations: [.init(location: "VS Code", activity: .running, hostPID: 1), .init()])
     precondition(state.visible && state.locations.map(\.location) == ["VS Code", "Terminal"])
     precondition(waitingForOpenCodeInput(session: "s1", log: "message=loop session.id=s1\nmessage=asking id=per_1"))

@@ -27,7 +27,7 @@
 - **Codex 额度**：显示 5 小时、7 天剩余额度及本地重置时间；百分比由绿到红表示额度充裕程度，每分钟刷新。
 - **后台 Touch Bar**：每块 198 × 30 点，切换前台应用后仍可显示；OpenCode 运行时自动加入对应小块。
 - **任务列表**：菜单按 Codex / OpenCode 分组显示已检测到的对话、位置与状态；点击打开对应界面。
-- **多实例**：OpenCode 按 Terminal / VS Code 分组，每个实例一个状态灯，点击小块轮询切换。
+- **多实例**：OpenCode 按 Terminal / VS Code / cmux 分组，每个实例一个状态灯，点击小块轮询切换。
 - **通知**：标明来源、对话名称，以及已完成、等待授权、等待回答或已终止；点击通知打开对应界面。
 
 | 状态 | Codex 边框 | OpenCode 状态灯 |
@@ -63,6 +63,8 @@ Codex 额度需要本机已经安装并登录 Codex / ChatGPT 应用；当前客
 首次启动时允许系统通知。若希望通知持续停留，请在系统通知设置中将 NotifyBar 的样式设为“提醒”。通知是否呈现还受系统权限和专注模式影响。
 
 跳转 Terminal / VS Code 时可能需要允许自动化；VS Code 集成终端聚焦使用键盘操作，可能需要辅助功能授权。应用不使用麦克风，也没有语音控制功能。
+
+cmux 跳转使用 OpenCode 进程继承的 workspace、surface 和 socket 标识定位具体终端。需要将 cmux 安装在 `/Applications/cmux.app`。外部 socket 访问需要以 `CMUX_SOCKET_MODE=allowAll` 启动 cmux，这会允许所有本机进程控制 cmux；默认“仅 cmux 内进程”模式会阻止从 cmux 外启动的 NotifyBar 切换标签页。缺少权限或这些标识时，点击只能唤起 cmux。暂不检测远程 OpenCode 进程。
 
 ## 实现与当前限制
 

@@ -27,7 +27,7 @@ Actual menu capture with conversation status and quick actions.
 - **Codex quotas:** remaining 5-hour and 7-day allowances with local reset times. Percentages shift from green to red as the allowance decreases. Refreshes every minute.
 - **Background Touch Bar:** compact 198 × 30 point blocks that remain visible when switching apps. The OpenCode block appears automatically while OpenCode is running.
 - **Task menu:** detected conversations grouped by Codex and OpenCode, with status and clickable navigation.
-- **Multiple instances:** OpenCode indicators grouped by Terminal and VS Code, with one light per instance. Tap the block to cycle through instances.
+- **Multiple instances:** OpenCode indicators grouped by Terminal, VS Code, and cmux, with one light per instance. Tap the block to cycle through instances.
 - **Notifications:** include the source, conversation name, and event: completed, awaiting authorization, awaiting an answer, or terminated. Click to open the corresponding interface.
 
 | State | Codex border | OpenCode indicator |
@@ -63,6 +63,8 @@ Codex quota monitoring requires an installed, signed-in Codex / ChatGPT desktop 
 Allow notifications when prompted. For persistent on-screen notifications, choose the Alerts style in macOS notification settings. Delivery also depends on notification permissions and Focus settings.
 
 Navigating to Terminal or VS Code may require Automation permission. Focusing the VS Code integrated terminal uses keyboard automation and may require Accessibility permission. The app does not use the microphone or provide voice controls.
+
+For cmux, NotifyBar reads the OpenCode process's inherited workspace, surface, and socket identifiers to focus the exact terminal. The bundled cmux CLI must be installed at `/Applications/cmux.app`. External socket access requires starting cmux with `CMUX_SOCKET_MODE=allowAll`, which allows all local processes to control cmux; the default cmux-only mode blocks NotifyBar's tab navigation when launched outside cmux. Without that access or inherited identifiers, clicking can only bring cmux to the foreground. Remote OpenCode processes are not detected.
 
 ## How it works and current limitations
 
